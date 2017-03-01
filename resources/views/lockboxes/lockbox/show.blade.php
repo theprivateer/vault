@@ -5,16 +5,17 @@
 
     @include('lockboxes.partials.toolbar')
 
+    @php($_editable = $lockbox->canBeEditedBy(Auth::user()))
 
 <div class="panel panel-default">
     <div class="panel-heading clearfix">
-        <h3 class="panel-title pull-left">
+        <h3 class="panel-title pull-left @if($_editable) with-btn @endif">
             {{ $lockbox->name }}
 
             <button class="btn btn-sm btn-empty" role="clipboard-copy" data-clipboard-text="{{ route('lockbox.show', $lockbox->uuid) }}" data-toggle="tooltip" title="Copy lockbox URL to clipboard"><i class="fa fa-link"></i></button>
         </h3>
 
-        @if($lockbox->canBeEditedBy(Auth::user()))
+        @if($_editable)
         <a href="{{ route('lockbox.edit', $lockbox->uuid) }}" class="btn btn-default btn-sm pull-right">Edit</a>
         @endif
     </div>
@@ -29,9 +30,9 @@
 @if($lockbox->secrets()->count())
 <div class="panel panel-default">
     <div class="panel-heading clearfix">
-        <h3 class="panel-title pull-left">Secrets</h3>
+        <h3 class="panel-title pull-left @if($_editable) with-btn @endif">Secrets</h3>
 
-        @if($lockbox->canBeEditedBy(Auth::user()))
+        @if($_editable)
             <a href="{{ route('secret.edit', $lockbox->uuid) }}" class="btn btn-default btn-sm pull-right">Edit</a>
         @endif
     </div>
@@ -61,9 +62,9 @@
 @if($lockbox->files()->count())
 <div class="panel panel-default">
     <div class="panel-heading clearfix">
-        <h3 class="panel-title pull-left">Files</h3>
+        <h3 class="panel-title pull-left @if($_editable) with-btn @endif">Files</h3>
 
-        @if($lockbox->canBeEditedBy(Auth::user()))
+        @if($_editable)
             <a href="{{ route('file.edit', $lockbox->uuid) }}" class="btn btn-default btn-sm pull-right">Edit</a>
         @endif
     </div>
