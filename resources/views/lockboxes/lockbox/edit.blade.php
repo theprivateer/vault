@@ -1,6 +1,8 @@
 @extends('layouts.app')
 
 @section('content')
+    @include('layouts.partials.lock')
+
     @include('lockboxes.partials.toolbar')
 
     {!! Form::model($lockbox, ['id' => 'lockbox-form']) !!}
@@ -69,31 +71,6 @@
 </div>
 {!! Form::close() !!}
 
-    <div class="panel panel-warning">
-        <div class="panel-heading">
-            <h3 class="panel-title">Move to another Vault</h3>
-        </div>
-
-        {!! Form::open(['route' => ['lockbox.move', $lockbox->uuid]]) !!}
-
-        <div class="panel-body">
-            <p>Move this lockbox to another vault that you have write access to:</p>
-             {!! Form::hidden('uuid', $lockbox->uuid) !!}
-            <!-- Vault Form Input -->
-            <div class="form-group">
-                {!! Form::label('vault', 'Vault:', ['class' => 'sr-only']) !!}
-                {!! Form::select('vault', Auth::user()->writableVaults->except($lockbox->vault_id)->pluck('name', 'uuid')->all(), null, ['class' => 'form-control']) !!}
-            </div>
-        </div>
-
-        <div class="panel-footer">
-            {!! Form::submit('Move Lockbox Now', ['class' => 'btn btn-warning']) !!}
-        </div>
-
-        {!! Form::close() !!}
-
-    </div>
-
 <div class="panel panel-danger">
     <div class="panel-heading">
         <h3 class="panel-title">Danger Zone</h3>
@@ -115,7 +92,6 @@
 
 @section('scripts')
     @parent
-    <script src="/js/vendor/bootbox.js"></script>
     <script src="/js/vendor/tinymce/tinymce.min.js"></script>
 
     <script>

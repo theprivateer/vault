@@ -16,6 +16,10 @@ class Secret extends Model
 
     protected $fillable = ['key', 'value', 'linked_lockbox_id', 'paranoid', 'sort_order'];
 
+    protected $hidden = [
+        'id', 'created_at', 'updated_at', 'sort_order', 'vault_id', 'paranoid', 'lockbox_id'
+    ];
+
     public function linkedLockbox()
     {
         return $this->belongsTo(Lockbox::class, 'linked_lockbox_id');

@@ -3,19 +3,18 @@
 @section('content')
     @include('vaults.vault.partials.toolbar')
 
-
-    <div class="panel panel-default">
+{!! Form::open(['role' => 'create-vault']) !!}
+<div class="panel panel-default">
     <div class="panel-heading">
         <h3 class="panel-title">Create Vault</h3>
     </div>
 
-    {!! Form::open() !!}
     <div class="panel-body">
         <!-- Name Form Input -->
         <div class="form-group{{ $errors->has('name') ? ' has-error' : '' }}">
             {!! Form::label('name', 'Name:', ['class' => 'control-label']) !!}
 
-            {!! Form::text('name', null, ['class' => 'form-control']) !!}
+            {!! Form::text('name', null, ['class' => 'form-control', 'required']) !!}
 
             @if ($errors->has('name'))
                 <span class="help-block">
@@ -36,10 +35,91 @@
             @endif
         </div>
     </div>
+</div>
+
+<div class="panel panel-default">
+    <div class="panel-heading">
+        <h3 class="panel-title">Security</h3>
+    </div>
+
+    <div class="panel-body">
+        <p>For added security, all secrets in this vault will use strong client-side encryption before being sent to the server (where it will be encrypted again).</p>
+
+        <!-- Password Form Input -->
+        <div class="form-group">
+            <label for="password" class="control-label">Master Password:</label>
+
+            <input id="password" type="password" class="form-control" role="password">
+        </div>
+
+        <div class="form-group">
+            <label for="password-confirmation" class="control-label">Confirm Master Password:</label>
+
+            <input id="password-confirmation" type="password" class="form-control" role="password-confirmation">
+        </div>
+    </div>
 
     <div class="panel-footer">
         {!! Form::submit('Create Vault', ['class' => 'btn btn-primary']) !!}
     </div>
-    {!! Form::close() !!}
+
 </div>
+
+{!! Form::close() !!}
+@endsection
+
+@section('scripts')
+    @parent
+
+    <script>
+        $('[role="create-vault"]').on('submit', function(e) {
+            e.preventDefault();
+
+            var theForm = this;
+
+            // Password validation
+
+            var password = $('[role="password"]').val();
+            var password_conf = $('[role="password-confirmation"]').val();
+
+            if(password != '')
+            {
+                if(password != password_conf)
+                {
+                    bootbox.alert('Your passwords don\'t match');
+                } else
+                {
+                    secureTheForm(theForm);
+                    theForm.submit();
+                }
+
+            } else
+            {
+                theForm.submit();
+            }
+        });
+
+        function secureTheForm(theForm)
+        {
+            // Convenience UUID generator so that passkey can be stored immediately
+            var uuid = generateUUID();
+
+            setPasskey(password, uuid)
+
+            $('<input type="hidden" />')
+                .attr('name', 'uuid')
+                .attr('value', uuid)
+                .appendTo(theForm);
+
+            // Now encrypt another random UUID for control purposes
+            var encrypted = CryptoJS.AES.encrypt(generateUUID(), password);
+
+            var str = encrypted.toString();
+
+            $('<input type="hidden" />')
+                .attr('name', 'control')
+                .attr('value', str)
+                .appendTo(theForm);
+        }
+    </script>
 @endsection

@@ -6,6 +6,7 @@ namespace Vault\Vaults;
 use Privateer\Uuid\UuidRepository;
 use Vault\Files\FileRepository;
 use Vault\Lockboxes\LockboxRepository;
+use Vault\Secrets\SecretRepository;
 use Vault\Users\User;
 use Vault\Users\UserRepository;
 
@@ -18,18 +19,6 @@ class VaultRepository
         $vault = new Vault($formData);
 
         $this->save($vault, $user);
-
-        (new LockboxRepository)->create([
-            'vault'         => $vault->uuid,
-            'name'          => 'Vault Control Lockbox',
-            'description'   => 'A hidden lockbox used as a control mechanism for testing the vault passkey',
-            'secrets'       => [
-                    [
-                        'key'       => 'control-key',
-                        'value'     => 'control-value',
-                    ]
-            ]
-        ], true);
 
         return $vault;
     }
@@ -54,6 +43,9 @@ class VaultRepository
         $vault->fill($formData);
 
         $vault->save();
+
+        // Secrets
+        if(isset($formData['secrets'])) (new SecretRepository)->update(null, $formData['secrets']);
 
         return $vault;
     }

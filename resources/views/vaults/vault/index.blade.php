@@ -7,6 +7,7 @@
 <div class="panel panel-default">
     <div class="panel-heading clearfix">
         <h3 class="panel-title pull-left">
+            @if($vault->control)<i class="fa fa-fw fa-lock"></i> @endif
             {{ $vault->name }}
         </h3>
 
@@ -49,7 +50,6 @@
 
 @section('scripts')
     @parent
-    <script src="/js/vendor/bootbox.js"></script>
 
     <script>
         $(document).on('click', '[role="leave-vault"]', function (e) {

@@ -12,7 +12,6 @@
 
     <!-- Styles -->
     <link href="/css/app.css" rel="stylesheet">
-    <link href="/js/vendor/easy-autocomplete/easy-autocomplete.min.css" rel="stylesheet">
 
     <!-- Fonts -->
     <link href="/css/font-awesome.css" rel="stylesheet">
@@ -60,7 +59,7 @@
 
                             <ul class="dropdown-menu" role="menu">
                                 @foreach(Auth::user()->vaults as $vault)
-                                    <li @if($vault->id == Auth::user()->currentVault->id) class="active" @endif><a href="{{ route('vault.show', $vault->uuid) }}">{{ $vault->name }}</a></li>
+                                    <li @if($vault->id == Auth::user()->current_vault_id) class="active" @endif><a href="{{ route('vault.show', $vault->uuid) }}">{{ $vault->name }}</a></li>
                                 @endforeach
                             </ul>
                         </li>
@@ -126,11 +125,26 @@
 
     </footer>
 
+
     </div>
     @section('scripts')
     <!-- Scripts -->
     <script src="/js/app.js"></script>
+    <script src="/js/vendor/bootbox.min.js"></script>
+    <script src="/js/vendor/clipboard.min.js"></script>
+    <script src="/js/vendor/aes.js"></script>
 
+    <script>
+        function generateUUID() {
+            var d = new Date().getTime();
+            var uuid = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                var r = (d + Math.random()*16)%16 | 0;
+                d = Math.floor(d/16);
+                return (c=='x' ? r : (r&0x3|0x8)).toString(16);
+            });
+            return uuid;
+        }
+    </script>
     @show
 </body>
 </html>

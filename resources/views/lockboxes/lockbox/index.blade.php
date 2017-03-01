@@ -1,6 +1,9 @@
 @extends('layouts.app')
 
 @section('content')
+
+@include('layouts.partials.lock')
+
 @include('lockboxes.partials.toolbar')
 
 @forelse($lockboxes as $lockbox)

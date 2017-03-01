@@ -1,6 +1,8 @@
 @extends('layouts.app')
 
 @section('content')
+    @include('layouts.partials.lock')
+
     @include('lockboxes.partials.toolbar')
 
 
@@ -40,13 +42,13 @@
         @foreach($lockbox->secrets()->orderBy('sort_order')->get() as $secret)
             <tr>
                 <td>
-                    {{ $secret->key }}
+                    <span data-encrypted="{{ $secret->key }}"></span>&nbsp;
                 </td>
                 <td>
-                    {!! $secret->present()->value() !!}
-
                     @if( empty($secret->linked_lockbox_id))
-                    <button class="btn btn-empty" role="clipboard-copy" data-clipboard-text="{{  $secret->value }}" data-toggle="tooltip" title="Copy to clipboard"><i class="fa fa-clipboard"></i></button>
+                    <span data-encrypted="{{ $secret->value }}" data-paranoid="{{ $secret->paranoid }}" data-clipboardable="true"></span>
+                    @elseif($lockbox = $secret->linkedLockbox)
+                    {!! link_to_route('lockbox.show', $lockbox->name, $lockbox->uuid, ['target' => '_blank']) !!}
                     @endif
                 </td>
             </tr>
@@ -90,16 +92,4 @@
 </div>
 @endif
 
-@endsection
-
-@section('scripts')
-    @parent
-    <script src="/js/vendor/clipboard.min.js"></script>
-
-    <script>
-        $(function () {
-            var clipboard = new Clipboard('[role="clipboard-copy"]');
-            $('[data-toggle="tooltip"]').tooltip();
-        });
-    </script>
 @endsection

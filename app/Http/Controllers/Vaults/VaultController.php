@@ -46,6 +46,14 @@ class VaultController extends Controller
         return redirect()->route('lockbox.index');
     }
 
+    public function reset()
+    {
+        Auth::user()->current_vault_id = 0;
+        Auth::user()->save();
+
+        return redirect()->route('vault.index');
+    }
+
     public function create()
     {
         return view('vaults.vault.create');
@@ -55,9 +63,12 @@ class VaultController extends Controller
     {
         $vault = $this->vaultRepository->create($request->all(), Auth::user());
 
+        Auth::user()->current_vault_id = $vault->id;
+        Auth::user()->save();
+
         flash()->success('Vault created');
 
-        return redirect()->route('vault.index');
+        return redirect()->route('lockbox.index');
     }
 
     public function edit($uuid)
@@ -71,6 +82,7 @@ class VaultController extends Controller
 
     public function update(UpdateRequest $request, $uuid)
     {
+
         $this->vaultRepository->update($request->all());
 
         flash()->success('Vault updated');

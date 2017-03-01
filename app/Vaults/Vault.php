@@ -6,13 +6,14 @@ use Illuminate\Database\Eloquent\Model;
 use Privateer\Uuid\EloquentUuid;
 use Vault\Files\File;
 use Vault\Lockboxes\Lockbox;
+use Vault\Secrets\Secret;
 use Vault\Users\User;
 
 class Vault extends Model
 {
     use EloquentUuid;
 
-    protected $fillable = ['name', 'description', 'use_passkey', 'passkey_reminder'];
+    protected $fillable = ['uuid', 'name', 'description', 'control'];
 
     public function owner()
     {
@@ -27,6 +28,11 @@ class Vault extends Model
     public function lockboxes()
     {
         return $this->hasMany(Lockbox::class);
+    }
+
+    public function secrets()
+    {
+        return $this->hasManyThrough(Secret::class, Lockbox::class);
     }
 
     public function files()

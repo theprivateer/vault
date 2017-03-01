@@ -1,6 +1,8 @@
 @extends('layouts.app')
 
 @section('content')
+    @include('layouts.partials.lock')
+
     @include('lockboxes.partials.toolbar')
 
     @include('lockboxes.partials.tabs', ['tab' => 'files'])
@@ -60,7 +62,6 @@
 @section('scripts')
     @parent
     <script src="/js/vendor/dropzone/dropzone.js"></script>
-    <script src="/js/vendor/bootbox.js"></script>
 
     <script>
         Dropzone.autoDiscover = false;

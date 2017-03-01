@@ -1,6 +1,8 @@
 @extends('layouts.app')
 
 @section('content')
+    @include('layouts.partials.lock')
+
     @include('lockboxes.partials.toolbar')
 
 {!! Form::open(['role' => 'lockbox-form']) !!}
@@ -16,7 +18,7 @@
         <div class="form-group{{ $errors->has('name') ? ' has-error' : '' }}">
             {!! Form::label('name', 'Name:', ['class' => 'control-label']) !!}
 
-            {!! Form::text('name', null, ['class' => 'form-control']) !!}
+            {!! Form::text('name', null, ['class' => 'form-control', 'required']) !!}
 
             @if ($errors->has('name'))
                 <span class="help-block">
@@ -225,6 +227,43 @@
         }
 
         initSorting();
+
+        $('[role="lockbox-form"]').on('submit', function(e) {
+            e.preventDefault();
+
+            var theForm = this;
+
+            var secrets = [];
+            var i = 0;
+
+            $('#secrets-table tbody tr').each(function(e) {
+
+                secrets[i] = {};
+                secrets[i].sort_order = $('[role="sort-order"]', this).val();
+                secrets[i].key = encryptForCurrentVault($('[role="secret-key"]', this).val());
+
+                if($('[role="secret-value"]', this).length > 0)
+                {
+                    secrets[i].value = encryptForCurrentVault($('[role="secret-value"]', this).val());
+                }
+
+                if($('[role="secret-lockbox-id"]', this).length > 0)
+                {
+                    secrets[i].linked_lockbox_id = $('[role="secret-lockbox-id"]', this).val();
+                }
+
+                secrets[i].paranoid = $('[role="secret-paranoid"]', this).is(':checked');
+
+                i++;
+            });
+
+            $('<input type="hidden" />')
+                .attr('name', 'secrets')
+                .attr('value', JSON.stringify(secrets))
+                .appendTo(theForm);
+
+            theForm.submit();
+        });
     </script>
 
     @include('lockboxes.partials.handlebars.secret-row')

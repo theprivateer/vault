@@ -15,37 +15,46 @@ class SecretRepository
        return $this->update($lockbox, $formData);
     }
 
-    public function update($lockbox, $formData)
+    public function update($lockbox = null, $json, $delete = null)
     {
-        if( ! is_object($lockbox)) $lockbox = Lockbox::where('uuid', $lockbox)->firstOrFail();
+        if( ! is_object($lockbox) && ! empty($lockbox)) $lockbox = Lockbox::where('uuid', $lockbox)->firstOrFail();
 
-        foreach($formData as $key => $data)
+        $secrets = json_decode($json);
+
+        foreach($secrets as $secret)
         {
-
-            if (is_numeric($key))
+            if(isset($secret->uuid))
             {
-                if( ! empty($data['key']))
+                $s = Secret::whereUuid($secret->uuid)->firstOrFail();
+
+                if(empty($secret->paranoid)) $secret->paranoid = false;
+
+                $s->fill(get_object_vars($secret));
+
+                $s->save();
+
+            } elseif( ! empty($lockbox))
+            {
+                $s = new Secret(get_object_vars($secret));
+
+                $lockbox->secrets()->save($s);
+            }
+        }
+
+        // Delete secrets where applicable
+        if( ! empty($delete))
+        {
+            $delete = json_decode($delete);
+
+            foreach($delete as $d)
+            {
+                try
                 {
-                    $secret = new Secret($data);
+                    $s = Secret::whereUuid(str_replace('_', '', $d))->firstOrFail();
 
-                    $lockbox->secrets()->save($secret);
-                }
-            } elseif(strpos($key, '_') !== 0) {
+                    $s->delete();
+                } catch(\Exception $e) { }
 
-                $secret = Secret::whereUuid($key)->firstOrFail();
-
-
-                if( isset($data['destroy']))
-                {
-                    $secret->delete();
-                } else
-                {
-                    if(empty($data['paranoid'])) $data['paranoid'] = false;
-
-                    $secret->fill($data);
-
-                    $secret->save();
-                }
             }
         }
     }

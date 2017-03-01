@@ -1,6 +1,9 @@
 @extends('layouts.app')
 
 @section('content')
+
+    @include('layouts.partials.lock', ['vault' => $vault])
+
     @include('vaults.vault.partials.toolbar')
 
 <div class="panel panel-default">
@@ -107,6 +110,10 @@
     <div class="panel-body">
         <p>Collaborators are not permitted to add additional collaborators or edit/delete the vault.</p>
 
+        @if($vault->control)
+            <p><strong>You will need to ensure that all collaborators know the master password for this vault.</strong></p>
+        @endif
+
         <!-- Email Form Input -->
         <div class="form-group{{ $errors->has('email') ? ' has-error' : '' }}">
             {!! Form::label('email', 'Email Address:') !!}
@@ -133,6 +140,37 @@
     {!! Form::close() !!}
 </div>
 
+<div class="panel panel-default">
+    <div class="panel-heading">
+        <h3 class="panel-title">Security</h3>
+    </div>
+
+    {!! Form::open(['role' => 'password-form']) !!}
+
+    {!! Form::hidden('uuid', $vault->uuid) !!}
+    {!! Form::hidden('name', $vault->name) !!}
+
+    <div class="panel-body">
+        <!-- Password Form Input -->
+        <div class="form-group">
+            <label for="password" class="control-label">Master Password:</label>
+
+            <input id="password" type="password" class="form-control" role="password" required>
+        </div>
+
+        <div class="form-group">
+            <label for="password-confirmation" class="control-label">Confirm Master Password:</label>
+
+            <input id="password-confirmation" type="password" class="form-control" role="password-confirmation">
+        </div>
+    </div>
+
+    <div class="panel-footer">
+        {!! Form::submit('Update Master Password', ['class' => 'btn btn-primary']) !!}
+    </div>
+    {!! Form::close() !!}
+</div>
+
 <div class="panel panel-danger">
     <div class="panel-heading">
         <h3 class="panel-title">Danger Zone</h3>
@@ -154,7 +192,6 @@
 
 @section('scripts')
     @parent
-    <script src="/js/vendor/bootbox.js"></script>
 
     <script>
         $(document).on('submit', '[role="destroy-vault"]', function (e) {
@@ -181,6 +218,80 @@
                     theForm.submit();
                 }
             });
+        });
+
+        $(document).on('submit', '[role="password-form"]', function (e) {
+            e.preventDefault();
+
+            var theForm = this;
+
+            var p = $('[role="password"]', theForm).val();
+            var password_conf = $('[role="password-confirmation"]', theForm).val();
+
+            if(p == '')
+            {
+                bootbox.alert('Please enter a Master Password');
+            } else if(p != password_conf)
+            {
+                bootbox.alert('Your passwords don\'t match');
+            } else
+            {
+                bootbox.confirm('Are you sure you want to update the master password for this vault?', function(result) {
+                    if(result)
+                    {
+
+                        // Get all of the secrets for this vault as a json string
+                        $.get('{{ route('vault.secrets', $vault->uuid) }}', function(data, status){
+                            var secrets = JSON.parse(data);
+
+                            console.log(secrets);
+
+                            var arrayLength = secrets.length;
+
+                            // decrypt using current password, the encrypt using new password
+                            for (var i = 0; i < arrayLength; i++) {
+                                var key = decryptForCurrentVault(secrets[i].key);
+
+                                secrets[i].key = CryptoJS.AES.encrypt(key, p).toString();
+
+
+                                if(secrets[i].value)
+                                {
+                                    var value = decryptForCurrentVault(secrets[i].value);
+                                    console.log(value);
+                                    secrets[i].value = CryptoJS.AES.encrypt(value, p).toString();
+                                }
+
+                            }
+
+                            $('<input type="hidden" />')
+                                .attr('name', 'secrets')
+                                .attr('value', JSON.stringify(secrets))
+                                .appendTo(theForm);
+
+                            console.log(secrets);
+
+                            // add a new control string to the payload
+                            var encrypted = CryptoJS.AES.encrypt(generateUUID(), p);
+
+                            var str = encrypted.toString();
+
+                            $('<input type="hidden" />')
+                                .attr('name', 'control')
+                                .attr('value', str)
+                                .appendTo(theForm);
+
+                            // replace password in local session storage
+                            {{--sessionStorage.setItem('{{ $vault->uuid }}', p);--}}
+
+                            setPasskey(p, '{{ $vault->uuid }}');
+
+                            // submit form to server for persistence to database
+                            theForm.submit();
+                        });
+                    }
+                });
+            }
         });
     </script>
 @endsection

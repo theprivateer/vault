@@ -16,7 +16,13 @@ test
 <script>
     // on entering a vault, check for existence of a vault password (stored in sessionStorage using the UUID as the key)
 
+    var name = sessionStorage.getItem("baz");
+
+    console.log(name);
+    //sessionStorage.setItem("foobar", "passphrase");
     // if not set, request it
+
+
     // request verified against the control lockbox for the vault
 
 
@@ -27,10 +33,16 @@ test
 
     console.log(str);
 
+    str = 'U2FsdGVkX18GDph28pdSpJfWUE6nZeMd6SbIkgEzrT7es2vGyYkmPZmXl3oglS21';
+
 
     var decrypted = CryptoJS.AES.decrypt(str, "passphrase");
 
-    console.log(decrypted.toString(CryptoJS.enc.Latin1));
+    if(decrypted.toString(CryptoJS.enc.Latin1))
+    {
+        console.log('success');
+    }
+    //console.log(decrypted.toString(CryptoJS.enc.Latin1));
 </script>
 
 </body>

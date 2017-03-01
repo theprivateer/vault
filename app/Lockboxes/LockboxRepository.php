@@ -20,7 +20,6 @@ class LockboxRepository
         if( ! is_object($vault)) $vault = Vault::where('uuid', $vault)->firstOrFail();
 
         return Lockbox::where('vault_id', $vault->id)
-            ->where('control', false)
             ->orderBy('name')->paginate();
     }
 
@@ -29,7 +28,6 @@ class LockboxRepository
         
         return Lockbox::with('vault')
             ->whereIn('vault_id', $user->vaults->pluck('id')->all())
-            ->where('control', false)
             ->orderBy('name')->get();
     }
 
@@ -49,14 +47,12 @@ class LockboxRepository
         return $array;
     }
 
-    public function create($formData, $control = false)
+    public function create($formData)
     {
         // Identify the Vault
         $vault = Vault::where('uuid', $formData['vault'])->firstOrFail();
 
         $lockbox = new Lockbox($formData);
-
-        $lockbox->control = $control;
 
         $vault->lockboxes()->save($lockbox);
 

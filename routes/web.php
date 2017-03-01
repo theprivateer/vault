@@ -108,6 +108,11 @@ Route::group(['middleware' => 'auth'], function() {
             'uses'  => 'FileController@destroy',
             'as'    => 'file.destroy'
         ]);
+
+        Route::get('vault/{uuid}/secrets', [
+            'uses'  => 'SecretController@index',
+            'as'    => 'vault.secrets'
+        ]);
     });
 
     Route::group(['namespace' => 'Vaults'], function() {
@@ -124,6 +129,11 @@ Route::group(['middleware' => 'auth'], function() {
         Route::post('vault/create', [
             'uses'  => 'VaultController@store',
             'as'    => 'vault.create'
+        ]);
+
+        Route::get('vault/reset', [
+            'uses'  => 'VaultController@reset',
+            'as'    => 'vault.reset'
         ]);
 
         Route::get('vault/{uuid}', [

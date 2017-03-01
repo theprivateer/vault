@@ -108,22 +108,6 @@ class LockboxController extends Controller
         return redirect()->back();
     }
 
-    public function move(Request $request, $uuid)
-    {
-        if( ! $this->lockboxAccessible($request->get('uuid')))
-        {
-            flash()->error('You do not have access to that lockbox');
-
-            return redirect()->route('lockbox.index');
-        }
-
-        $this->lockboxRepository->move($request->all());
-
-        flash()->success('Lockbox moved');
-
-        return redirect()->route('lockbox.index');
-    }
-
     public function destroy(Request $request)
     {
         if( ! $this->lockboxAccessible($request->get('uuid')))

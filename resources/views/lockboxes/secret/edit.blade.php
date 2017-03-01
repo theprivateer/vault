@@ -23,55 +23,41 @@
             </thead>
             <tbody>
             @foreach($lockbox->secrets()->orderBy('sort_order')->get() as $secret)
-                <tr id="{{ $secret->uuid }}">
+                <tr id="_{{ $secret->uuid }}">
                     <td class="sort-handle">
                         <i class="fa fa-sort"></i>
-                        {!! Form::hidden('secrets[' . $secret->uuid . '][sort_order]', $secret->sort_order, ['role' => 'sort-order']) !!}
+                        <input type="hidden" role="sort-order" value="{{ $secret->sort_order }}">
+                        <input type="hidden" role="secret-uuid" value="{{ $secret->uuid }}">
                     </td>
                     <td>
-                        <div class="form-group{{ $errors->has('secrets.' . $secret->uuid . 'key') ? ' has-error' : '' }}">
-                            {!! Form::label('secrets[' . $secret->uuid . '][key]', 'Key:', ['class' => 'sr-only']) !!}
-
-                            {!! Form::text('secrets[' . $secret->uuid . '][key]', $secret->key, ['class' => 'form-control']) !!}
-
-                            @if ($errors->has('secrets.' . $secret->uuid . 'key'))
-                                <span class="help-block">
-                            <strong>{{ $errors->first('secrets.' . $secret->uuid . 'key') }}</strong>
-                        </span>
-                            @endif
+                        <div class="form-group">
+                            <input type="text" role="secret-key" class="form-control" placeholder="Key/Label" data-encrypted="{{ $secret->key }}" required>
                         </div>
                     </td>
 
                     @if( empty($secret->linked_lockbox_id))
                         <td>
-                            <div class="form-group{{ $errors->has('secrets.' . $secret->uuid . 'value') ? ' has-error' : '' }}">
-                                {!! Form::label('secrets[' . $secret->uuid . '][value]', 'Value:', ['class' => 'sr-only']) !!}
 
-                                {!! Form::text('secrets[' . $secret->uuid . '][value]', $secret->value, ['class' => 'form-control']) !!}
-
-                                @if ($errors->has('secrets.' . $secret->uuid . 'value'))
-                                    <span class="help-block">
-                            <strong>{{ $errors->first('secrets.' . $secret->uuid . 'value') }}</strong>
-                        </span>
-                                @endif
+                            <div class="form-group">
+                                <input type="text" role="secret-value"  class="form-control" data-encrypted="{{ $secret->value }}" placeholder="Value">
                             </div>
                         </td>
                         <td>
-                            {!! Form::checkbox('secrets[' . $secret->uuid . '][paranoid]', 1, (boolean) $secret->paranoid) !!}
+                            <input type="checkbox" role="secret-paranoid" value="1" @if((boolean) $secret->paranoid) checked="checked" @endif>
                         </td>
                     @else
                         <td>
                             <div class="form-group">
                                 <div class="input-group">
                                     <div class="input-group-addon"><i class="fa fa-lock"></i></div>
-                                    {!! Form::select('secrets[' . $secret->uuid . '][linked_lockbox_id]', $linkableLockboxes, $secret->linked_lockbox_id, ['class' => 'form-control']) !!}
+                                    {!! Form::select(null, $linkableLockboxes, $secret->linked_lockbox_id, ['class' => 'form-control', 'role' => 'secret-lockbox-id']) !!}
                                 </div>
                             </div>
                         </td>
                         <td></td>
                     @endif
                     <td>
-                        <button class="btn btn-default btn-block" role="remove-secret" data-uuid="{{ $secret->uuid }}">Delete</button>
+                        <button class="btn btn-default btn-block" role="remove-secret" data-uuid="_{{ $secret->uuid }}">Delete</button>
                     </td>
                 </tr>
             @endforeach
@@ -103,6 +89,7 @@
 
     <script>
         var counter = 1;
+        var deleteSecrets = [];
 
         $('[role="add-secret"]').on('click', function(e) {
             e.preventDefault();
@@ -143,15 +130,12 @@
             e.preventDefault();
 
             var uuid = $(this).data('uuid');
-
+            console.log(uuid);
             $('#' + uuid).remove();
 
             doSorting();
 
-            // Append something to the form
-            $('<input type="hidden" value="1" />')
-                    .attr("name", 'secrets[' + uuid + '][destroy]')
-                    .appendTo( $('#secrets-form') );
+            deleteSecrets.push(uuid);
 
         });
 
@@ -192,6 +176,55 @@
         }
 
         initSorting();
+
+        $('#secrets-form').on('submit', function(e) {
+            e.preventDefault();
+
+            var theForm = this;
+
+            var secrets = [];
+            var i = 0;
+
+            $('#secrets-table tbody tr').each(function(e) {
+
+                secrets[i] = {};
+                secrets[i].sort_order = $('[role="sort-order"]', this).val();
+                secrets[i].key = encryptForCurrentVault($('[role="secret-key"]', this).val());
+
+                if($('[role="secret-uuid"]', this).length > 0)
+                {
+                    secrets[i].uuid = $('[role="secret-uuid"]', this).val();
+                }
+
+                if($('[role="secret-value"]', this).length > 0)
+                {
+                    secrets[i].value = encryptForCurrentVault($('[role="secret-value"]', this).val());
+                }
+
+                if($('[role="secret-lockbox-id"]', this).length > 0)
+                {
+                    secrets[i].linked_lockbox_id = $('[role="secret-lockbox-id"]', this).val();
+                }
+
+                secrets[i].paranoid = $('[role="secret-paranoid"]', this).is(':checked');
+
+                i++;
+            });
+
+            $('<input type="hidden" />')
+                .attr('name', 'secrets')
+                .attr('value', JSON.stringify(secrets))
+                .appendTo(theForm);
+
+
+            $('<input type="hidden" />')
+                .attr('name', 'delete-secrets')
+                .attr('value', JSON.stringify(deleteSecrets))
+                .appendTo(theForm);
+
+//            console.log( JSON.stringify(deleteSecrets));
+            theForm.submit();
+        });
 
     </script>
 
