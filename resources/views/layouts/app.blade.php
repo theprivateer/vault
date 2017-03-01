@@ -16,6 +16,8 @@
     <!-- Fonts -->
     <link href="/css/font-awesome.css" rel="stylesheet">
 
+    <link rel="shortcut icon" href="/img/favicon.png">
+
     <!-- Scripts -->
     <script>
         window.Laravel = <?php echo json_encode([

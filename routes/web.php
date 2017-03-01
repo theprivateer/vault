@@ -136,6 +136,11 @@ Route::group(['middleware' => 'auth'], function() {
             'as'    => 'vault.reset'
         ]);
 
+        Route::get('vault/incorrect', [
+            'uses'  => 'VaultController@incorrect',
+            'as'    => 'vault.incorrect'
+        ]);
+
         Route::get('vault/{uuid}', [
             'uses'  => 'VaultController@show',
             'as'    => 'vault.show'

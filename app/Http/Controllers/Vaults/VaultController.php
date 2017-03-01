@@ -54,6 +54,13 @@ class VaultController extends Controller
         return redirect()->route('vault.index');
     }
 
+    public function incorrect()
+    {
+        flash()->error('Incorrect password');
+
+        return $this->reset();
+    }
+
     public function create()
     {
         return view('vaults.vault.create');

@@ -123,12 +123,12 @@
                                 decryptFields();
                             } else
                             {
-                                window.location = "{{ route('vault.reset') }}";
+                                window.location = "{{ route('vault.incorrect') }}";
                             }
 
                         } else
                         {
-                            window.location = "{{ route('vault.reset') }}";
+                            window.location = "{{ route('vault.incorrect') }}";
                         }
 
                     }});
