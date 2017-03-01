@@ -77,7 +77,6 @@
             {
                 uuid = '{{ $vault->uuid }}';
             }
-            console.log(sessionStorage.getItem('{{ session()->getId() }}.' + uuid));
             return sessionStorage.getItem('{{ session()->getId() }}.' + uuid);
         }
 
@@ -87,7 +86,6 @@
             {
                 uuid = '{{ $vault->uuid }}';
             }
-            console.log(uuid);
             sessionStorage.setItem('{{ session()->getId() }}.' + uuid, passKey);
         }
     </script>
@@ -118,7 +116,6 @@
                     callback: function(result){
                         if(result)
                         {
-                            console.log(result);
                             if(checkPasskey(result))
                             {
                                 setPasskey(result);
@@ -140,7 +137,6 @@
             function checkPasskey(passKey)
             {
                 var decrypted = CryptoJS.AES.decrypt('{{ $vault->control }}', passKey);
-                console.log(decrypted.toString(CryptoJS.enc.Latin1));
 
                 if(decrypted.toString(CryptoJS.enc.Latin1) && decrypted.toString(CryptoJS.enc.Latin1).length == 36)
                 {
