@@ -41,7 +41,7 @@ class RegisterController extends Controller
 
     public function showRegistrationForm()
     {
-        if(config('vault.registrations')) return view('auth.register');;
+        if(config('vault.registrations')) return view('auth.register');
 
         return redirect()->to('/login');
     }
