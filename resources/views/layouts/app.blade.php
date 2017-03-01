@@ -116,12 +116,13 @@
     </div>
 
     <footer class="container">
-        <p class="text-center small">
-            Made by <a href="https://github.com/theprivateer">The Privateer</a> {{ date('Y') }}
-            @if (Auth::check())
-             | <a href="{{ route('vault.index') }}">Manage Vaults</a>
-            @endif
-        </p>
+
+
+        @if (Auth::check())
+        <p class="text-center small"><a href="{{ route('vault.index') }}">Manage Vaults</a></p>
+        @endif
+
+        <p class="text-center small">Powered by <a href="https://github.com/theprivateer/vault" target="_blank">Vault</a></p>
 
     </footer>
 

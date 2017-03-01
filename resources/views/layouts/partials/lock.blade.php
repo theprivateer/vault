@@ -1,7 +1,7 @@
 <?php if( ! isset($vault)) $vault = Auth::user()->currentVault; ?>
 
 @if(empty($vault->control))
-    <div class="alert alert-info text-center">
+    <div class="alert alert-danger text-center">
         This vault does not have a master password set for client-side encryption. <a href="{{ route('vault.edit', $vault->uuid) }}">Set one now...</a>
     </div>
 @endif
