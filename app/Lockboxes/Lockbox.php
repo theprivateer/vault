@@ -2,6 +2,7 @@
 
 namespace Vault\Lockboxes;
 
+use AlgoliaSearch\Laravel\AlgoliaEloquentTrait;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 use Privateer\Uuid\EloquentUuid;
@@ -12,7 +13,11 @@ use Vault\Vaults\Vault;
 
 class Lockbox extends Model
 {
-    use EloquentUuid;
+    use EloquentUuid, AlgoliaEloquentTrait;
+
+    public $indices = ['lockboxes'];
+
+    public static $objectIdKey = 'uuid';
 
     protected $fillable = ['name', 'description', 'notes'];
 
@@ -47,5 +52,16 @@ class Lockbox extends Model
 
         return false;
 
+    }
+
+    public function getAlgoliaRecord()
+    {
+        return [
+            'uuid'          => $this->getAttribute('uuid'),
+            'vault_id'      => $this->getAttribute('vault_id'),
+            'display'       => $this->getAttribute('name') . ' [' . $this->vault->name . ']',
+            'name'          => $this->getAttribute('name'),
+            'description'   => $this->getAttribute('description'),
+        ];
     }
 }

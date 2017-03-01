@@ -12,7 +12,8 @@
         "laracasts/presenter": "^0.2.1",
         "league/commonmark": "^0.15.1",
         "league/flysystem-aws-s3-v3": "^1.0",
-        "theprivateer/eloquent-uuid": "^0.1.1"
+        "theprivateer/eloquent-uuid": "^0.1.1",
+        "algolia/algoliasearch-laravel": "^1.7"
     },
     "require-dev": {
         "fzaninotto/faker": "~1.4",

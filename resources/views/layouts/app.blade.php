@@ -49,6 +49,8 @@
 
             <div class="collapse navbar-collapse" id="app-navbar-collapse">
                 <!-- Left Side Of Navbar -->
+
+
                 @if (Auth::guest())
 
                 @else
@@ -67,6 +69,12 @@
                         </li>
                     @endif
                 </ul>
+
+                @if($_hasAlgolia = config('algolia.connections.main.search'))
+                <form class="navbar-form navbar-left">
+                    <input type="text" class="form-control navbar-search" placeholder="Search Lockboxes" role="lockbox-autocomplete">
+                </form>
+                @endif
                 @endif
 
                 <!-- Right Side Of Navbar -->
@@ -136,6 +144,31 @@
     <script src="/js/vendor/bootbox.min.js"></script>
     <script src="/js/vendor/clipboard.min.js"></script>
     <script src="/js/vendor/aes.js"></script>
+
+    @if( ! empty($_hasAlgolia))
+    <script src="https://cdn.jsdelivr.net/algoliasearch/3/algoliasearch.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/autocomplete.js/0/autocomplete.min.js"></script>
+
+    <script>
+        var client = algoliasearch('{{ config('algolia.connections.main.id') }}', '{{ config('algolia.connections.main.search') }}');
+
+        var index_lockboxes = client.initIndex('lockboxes');
+
+        autocomplete('[role="lockbox-autocomplete"]', {hint: false}, [
+            {
+                source: autocomplete.sources.hits(index_lockboxes, {hitsPerPage: 10, filters: '{{ Auth::user()->algoliaVaultFilter() }}'}),
+                displayKey: 'display',
+                templates: {
+                    suggestion: function(suggestion) {
+                        return suggestion._highlightResult.display.value;
+                    }
+                }
+            }
+        ]).on('autocomplete:selected', function(event, suggestion, dataset) {
+            window.location = '/lockbox/' + suggestion.uuid;
+        });
+    </script>
+    @endif
 
     <script>
         function generateUUID() {

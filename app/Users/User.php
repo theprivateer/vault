@@ -81,4 +81,16 @@ class User extends Authenticatable
 
         return ! empty($relationship);
     }
+
+    public function algoliaVaultFilter()
+    {
+        $v = [];
+
+        foreach($this->vaults()->pluck('vault_id')->all() as $id)
+        {
+            $v[] = 'vault_id=' . $id;
+        }
+
+        return implode(' OR ', $v);
+    }
 }
