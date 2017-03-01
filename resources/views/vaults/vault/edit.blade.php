@@ -268,9 +268,7 @@
                                 .attr('name', 'secrets')
                                 .attr('value', JSON.stringify(secrets))
                                 .appendTo(theForm);
-
-                            console.log(secrets);
-
+                            
                             // add a new control string to the payload
                             var encrypted = CryptoJS.AES.encrypt(generateUUID(), p);
 
@@ -282,9 +280,7 @@
                                 .appendTo(theForm);
 
                             // replace password in local session storage
-                            {{--sessionStorage.setItem('{{ $vault->uuid }}', p);--}}
-
-                            setPasskey(p, '{{ $vault->uuid }}');
+                            setPasskey(p);
 
                             // submit form to server for persistence to database
                             theForm.submit();
