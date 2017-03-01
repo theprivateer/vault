@@ -268,7 +268,7 @@
                                 .attr('name', 'secrets')
                                 .attr('value', JSON.stringify(secrets))
                                 .appendTo(theForm);
-                            
+
                             // add a new control string to the payload
                             var encrypted = CryptoJS.AES.encrypt(generateUUID(), p);
 
