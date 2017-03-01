@@ -1,3 +1,13 @@
+.navbar-brand
+{
+  width: 100px;
+  margin-left: $grid-gutter-width / 2;
+  margin-right: $grid-gutter-width / 2;
+  background: url('/img/header-logo.png') no-repeat 50% 50%;
+  background-size: auto 30px;
+  @include text-hide;
+}
+
 .btn-empty
 {
   background: none;
@@ -93,4 +103,9 @@ td.btn-column
   {
     padding-right: $grid-gutter-width / 2;
   }
+}
+
+h3.panel-title.with-btn
+{
+  margin-top: 6px;
 }

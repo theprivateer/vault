@@ -1,5 +1,5 @@
 @charset "UTF-8";
-@import url(https://fonts.googleapis.com/css?family=Lato:300,400,600);
+@import url(https://fonts.googleapis.com/css?family=Lato:300);
 /*!
  * Bootstrap v3.3.7 (http://getbootstrap.com)
  * Copyright 2011-2016 Twitter, Inc.
@@ -7688,6 +7688,19 @@ button.close {
   }
 }
 
+.navbar-brand {
+  width: 100px;
+  margin-left: 15px;
+  margin-right: 15px;
+  background: url("/img/header-logo.png") no-repeat 50% 50%;
+  background-size: auto 30px;
+  font: 0/0 a;
+  color: transparent;
+  text-shadow: none;
+  background-color: transparent;
+  border: 0;
+}
+
 .btn-empty {
   background: none;
   padding: 3px 10px;
@@ -7759,6 +7772,10 @@ td.btn-column {
 
 .table-panel tr td:last-child {
   padding-right: 15px;
+}
+
+h3.panel-title.with-btn {
+  margin-top: 6px;
 }
 
 .algolia-autocomplete {

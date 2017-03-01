@@ -6,7 +6,7 @@
 @forelse($vaults as $vault)
 <div class="panel panel-default">
     <div class="panel-heading clearfix">
-        <h3 class="panel-title pull-left">
+        <h3 class="panel-title pull-left with-btn">
             @if($vault->control)<i class="fa fa-fw fa-lock"></i> @endif
             {{ $vault->name }}
         </h3>

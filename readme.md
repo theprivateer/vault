@@ -1,3 +1,5 @@
+![Vault](https://s3-ap-southeast-2.amazonaws.com/theprivateer/static/vault-inline-1.png)
+
 # Vault
 
 ### Secure All The Things!

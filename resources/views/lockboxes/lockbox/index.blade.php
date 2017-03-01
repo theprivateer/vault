@@ -9,7 +9,7 @@
 @forelse($lockboxes as $lockbox)
 <div class="panel panel-default">
     <div class="panel-heading clearfix">
-        <h3 class="panel-title pull-left">
+        <h3 class="panel-title pull-left with-btn">
             {!! link_to_route('lockbox.show', $lockbox->name, $lockbox->uuid) !!}
         </h3>
 
