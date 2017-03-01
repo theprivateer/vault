@@ -132,7 +132,9 @@
         <p class="text-center small"><a href="{{ route('vault.index') }}">Manage Vaults</a></p>
         @endif
 
+        @if(config('vault.credit'))
         <p class="text-center small">Powered by <a href="https://github.com/theprivateer/vault" target="_blank">Vault</a></p>
+        @endif
 
     </footer>
 

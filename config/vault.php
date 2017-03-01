@@ -2,13 +2,14 @@
 
 return [
 
-    'key' => env('VAULT_KEY'),
+    'key'           => env('VAULT_KEY'),
 
-    'cipher' => 'AES-256-CBC',
+    'cipher'        => 'AES-256-CBC',
 
+    'registrations' => env('VAULT_REGISTRATIONS', true),
 
-    'registrations' => true,
+    'splash_page'   => env('VAULT_SPLASH_PAGE', true),
 
-    'splash_page' => true,
+    'credit'        => env('DISPLAY_VAULT_CREDIT', true),
 
 ];

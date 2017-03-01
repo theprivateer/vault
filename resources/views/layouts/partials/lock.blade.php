@@ -2,7 +2,7 @@
 
 @if(empty($vault->control))
     <div class="alert alert-danger text-center">
-        This vault does not have a master password set for client-side encryption. <a href="{{ route('vault.edit', $vault->uuid) }}">Set one now...</a>
+        <i class="fa fa-exclamation-triangle"></i> This vault does not have a master password set for client-side encryption. <a href="{{ route('vault.edit', $vault->uuid) }}">Set one now...</a>
     </div>
 @endif
 
