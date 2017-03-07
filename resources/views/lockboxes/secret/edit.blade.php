@@ -1,6 +1,8 @@
 @extends('layouts.app')
 
 @section('content')
+    @include('layouts.partials.lock')
+
     @include('lockboxes.partials.toolbar')
 
     @include('lockboxes.partials.tabs', ['tab' => 'secrets'])
