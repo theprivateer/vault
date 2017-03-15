@@ -89,7 +89,7 @@
                     bootbox.alert('Your passwords don\'t match');
                 } else
                 {
-                    secureTheForm(theForm);
+                    secureTheForm(theForm, password);
                     theForm.submit();
                 }
 
@@ -99,12 +99,12 @@
             }
         });
 
-        function secureTheForm(theForm)
+        function secureTheForm(theForm, password)
         {
             // Convenience UUID generator so that passkey can be stored immediately
             var uuid = generateUUID();
 
-            setPasskey(password, uuid)
+            setPasskey(password, uuid);
 
             $('<input type="hidden" />')
                 .attr('name', 'uuid')
@@ -120,6 +120,11 @@
                 .attr('name', 'control')
                 .attr('value', str)
                 .appendTo(theForm);
+        }
+
+        function setPasskey(passKey, uuid)
+        {
+            sessionStorage.setItem('{{ session()->getId() }}.' + uuid, passKey);
         }
     </script>
 @endsection
