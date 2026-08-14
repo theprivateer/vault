@@ -12,6 +12,7 @@
         "infer-conventions",
         "laravel-best-practices",
         "pest-testing",
+        "inertia-vue-development",
         "tailwindcss-development"
     ]
 }

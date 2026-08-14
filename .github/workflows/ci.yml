@@ -1,0 +1,124 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PHP_VERSION: '8.4'
+  NODE_VERSION: '24'
+
+jobs:
+  backend:
+    name: Backend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ env.PHP_VERSION }}
+          extensions: sodium, sqlite3, pdo_sqlite
+          coverage: xdebug
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install PHP dependencies
+        run: composer install --prefer-dist --no-interaction --no-progress
+
+      - name: Install JS dependencies
+        run: npm ci --ignore-scripts
+
+      # The security-header tests assert against real Vite output, so the
+      # manifest has to exist before the suite runs.
+      - name: Build assets
+        run: npm run build
+
+      - name: Prepare environment
+        run: |
+          cp .env.example .env
+          php artisan key:generate
+
+      - name: Check formatting
+        run: vendor/bin/pint --test
+
+      - name: Static analysis
+        run: vendor/bin/phpstan analyse --memory-limit=1G --no-progress
+
+      - name: Tests
+        run: php artisan test --coverage
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install JS dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Type check
+        run: npm run types
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Check formatting
+        run: npm run format:check
+
+      # Enforces the 100% threshold on resources/js/crypto once Phase 1 lands.
+      - name: Tests
+        run: npm run test:coverage
+
+  security:
+    name: Security
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ env.PHP_VERSION }}
+          extensions: sodium
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install PHP dependencies
+        run: composer install --prefer-dist --no-interaction --no-progress
+
+      - name: Install JS dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Audit PHP dependencies
+        run: composer audit
+
+      - name: Audit JS dependencies
+        run: npm audit --audit-level=moderate
+
+      # SR2: no key capable of decrypting user content may exist on the server,
+      # so no server-side decryption path may exist either. See
+      # docs/02-threat-model.md.
+      - name: Assert no server-side decryption
+        run: |
+          if grep -rnE '\b(decrypt|decryptString|Crypt::|openssl_decrypt|sodium_crypto_[a-z_]*_open)\b' \
+               --include='*.php' app/; then
+            echo "::error::Found a server-side decryption path in app/. The server must never be able to decrypt user content (SR2)."
+            exit 1
+          fi
+          echo "No server-side decryption paths found."

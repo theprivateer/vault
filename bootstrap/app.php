@@ -1,5 +1,7 @@
 <?php
 
+use App\Http\Middleware\HandleInertiaRequests;
+use App\Http\Middleware\SecurityHeaders;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -12,10 +14,33 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        //
+        // SecurityHeaders is prepended so the CSP nonce exists before anything
+        // renders a script or style tag.
+        $middleware->web(prepend: [
+            SecurityHeaders::class,
+        ], append: [
+            HandleInertiaRequests::class,
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(
             fn (Request $request) => $request->is('api/*') || $request->expectsJson(),
         );
+
+        /*
+         | Flashed input survives a redirect in the session, and exception
+         | reports carry it off the box entirely. Nothing here may ever be
+         | written down. Entries are listed ahead of the fields existing
+         | (Phase 2 adds them) precisely because this is the kind of guardrail
+         | that gets remembered only after it was needed. See SR1.
+         */
+        $exceptions->dontFlash([
+            'auth_key',
+            'current_password',
+            'master_password',
+            'password',
+            'password_confirmation',
+            'recovery_code',
+            'wrapped_user_key',
+        ]);
     })->create();

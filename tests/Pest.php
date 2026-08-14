@@ -1,6 +1,7 @@
 <?php
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Testing\TestResponse;
 use Tests\TestCase;
 
 /*
@@ -29,10 +30,6 @@ pest()->extend(TestCase::class)
 |
 */
 
-expect()->extend('toBeOne', function () {
-    return $this->toBe(1);
-});
-
 /*
 |--------------------------------------------------------------------------
 | Functions
@@ -44,7 +41,39 @@ expect()->extend('toBeOne', function () {
 |
 */
 
-function something()
+/**
+ * Parses a response's Content-Security-Policy header into its directives.
+ *
+ * @template TResponse of \Symfony\Component\HttpFoundation\Response
+ *
+ * @param  TestResponse<TResponse>  $response
+ * @return array<string, string>
+ */
+function cspDirectives(TestResponse $response): array
 {
-    // ..
+    $header = $response->headers->get('Content-Security-Policy') ?? '';
+
+    return collect(explode(';', $header))
+        ->map(fn (string $directive): string => trim($directive))
+        ->filter()
+        ->mapWithKeys(function (string $directive): array {
+            [$name, $value] = array_pad(explode(' ', $directive, 2), 2, '');
+
+            return [$name => $value];
+        })
+        ->all();
+}
+
+/**
+ * Extracts the nonce the CSP authorises, or an empty string if there is none.
+ *
+ * @template TResponse of \Symfony\Component\HttpFoundation\Response
+ *
+ * @param  TestResponse<TResponse>  $response
+ */
+function cspNonce(TestResponse $response): string
+{
+    preg_match("/'nonce-([^']+)'/", cspDirectives($response)['script-src'] ?? '', $matches);
+
+    return $matches[1] ?? '';
 }

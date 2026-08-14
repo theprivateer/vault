@@ -16,6 +16,7 @@ ciphertext and wrapped keys, and never holds a key capable of decrypting them.**
 | [04 — Data Model](04-data-model.md) | Schema, what each column leaks, migration notes |
 | [05 — Implementation Plan](05-implementation-plan.md) | **The phases.** 13 phases, each with deliverables and exit criteria |
 | [06 — Testing & CI](06-testing-and-ci.md) | Test strategy, the leak canary, CI gates |
+| [adr/](adr/) | Decision records — why a choice was made, and what was rejected |
 
 ## The one-paragraph summary
 
@@ -39,4 +40,7 @@ opaque to the server; search happens in the browser.
 
 ## Status
 
-Planning complete; no implementation started. The repo is a bare Laravel 13 skeleton.
+**Phase 0 (foundations & guardrails) complete.** Inertia v3 + Vue 3 + TypeScript strict, a
+strict nonce-based CSP enforced from the first render, Larastan at max level, and CI gating every
+check. Next: [Phase 1 — the crypto core](05-implementation-plan.md#phase-1--crypto-core-library),
+which begins by benchmarking Argon2id ([ADR-0003](adr/0003-argon2id-implementation.md)).

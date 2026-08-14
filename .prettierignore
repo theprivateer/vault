@@ -1,0 +1,16 @@
+node_modules
+vendor
+public/build
+public/hot
+coverage
+storage
+bootstrap/ssr
+
+# Tool-managed files — let their own tooling own the formatting.
+composer.json
+composer.lock
+package-lock.json
+boost.json
+
+# Documentation is hand-formatted; reflowing tables and prose adds noise.
+*.md
