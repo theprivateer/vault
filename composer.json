@@ -1,11 +1,13 @@
 {
     "$schema": "https://getcomposer.org/schema.json",
-    "name": "laravel/laravel",
+    "name": "theprivateer/vault",
     "type": "project",
-    "description": "The skeleton application for the Laravel framework.",
+    "description": "A zero-knowledge, end-to-end encrypted secret manager.",
     "keywords": [
-        "laravel",
-        "framework"
+        "encryption",
+        "end-to-end-encryption",
+        "secret-manager",
+        "zero-knowledge"
     ],
     "license": "MIT",
     "require": {

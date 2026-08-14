@@ -138,5 +138,16 @@ async function create(): Promise<void> {
         <p v-else-if="!failure" class="mt-6 text-sm text-muted">
             No vaults yet. Create one — its name is encrypted before it is sent.
         </p>
+
+        <!--
+            D10: the threat model belongs in the product, not only in the repo.
+            Phase 11 gives this a page of its own; until then it lives where
+            someone will actually read it. See docs/02-threat-model.md (A3).
+        -->
+        <NoticePanel heading="what the server can see" class="mt-10">
+            Timestamps, sizes and the shape of your data. Not names, not values, not filenames. A compromised
+            server can still serve modified JavaScript to this page — that is the limit of browser-delivered
+            encryption, and no amount of cryptography here removes it.
+        </NoticePanel>
     </AppLayout>
 </template>

@@ -1,58 +1,163 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# Vault
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+A zero-knowledge, end-to-end encrypted secret manager. The server stores ciphertext and wrapped
+keys, and holds no key capable of decrypting any of it.
 
-## About Laravel
+This is a ground-up rebuild of a 2017 application of mine that got the structure right and the
+cryptography wrong: it encrypted secrets at rest with a single application-wide key, then decrypted
+them on the server before rendering. Anyone with the database and the `.env` had everything. This
+version moves the trust boundary into the browser.
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+**It is built to learn from, not to sell.** The interesting artefact is
+[`docs/`](docs/) — the threat model, the cryptographic design, and the reasoning behind each
+decision including the ones that were rejected.
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+## How it works, in one paragraph
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+Your password is stretched with Argon2id **in your browser** into two independent keys: a
+key-encryption key that never leaves the device, and an auth key that is all the server ever sees
+(and only ever as a slow hash). The KEK unwraps a random per-account **User Key**, which unwraps
+your X25519 and Ed25519 private keys. Each vault has a random **Vault Key**, sealed individually to
+each member's public key. Each item — vault, lockbox, secret — has its own **Item Key** wrapped by
+the Vault Key, so rotating a vault costs a re-wrap of 32-byte blobs rather than re-encrypting
+everything. Every ciphertext is bound by AEAD associated data to the exact record it belongs to, so
+a malicious server cannot move one ciphertext into another record's place. Names, notes and types
+all live inside the encrypted payload, so search happens in the browser.
 
-## Learning Laravel
+## What that looks like in the database
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
+A vault called "Production Infrastructure", holding a secret whose value is `hunter2-the-real-one`:
 
-In addition, [Laracasts](https://laracasts.com) contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
-
-You can also watch bite-sized lessons with real-world projects on [Laravel Learn](https://laravel.com/learn), where you will be guided through building a Laravel application from scratch while learning PHP fundamentals.
-
-## Agentic Development
-
-Laravel's predictable structure and conventions make it ideal for AI coding agents like Claude Code, Cursor, and GitHub Copilot. Install [Laravel Boost](https://laravel.com/docs/ai) to supercharge your AI workflow:
-
-```bash
-composer require laravel/boost --dev
-
-php artisan boost:install
+```
+INSERT INTO vaults    VALUES(1,'01a0024a-2847-…',1,'AQHQ5WS1D1CVNg7geMG4AlHln6L4k5/Qxx9C5kZN60c9…
+INSERT INTO lockboxes VALUES(1,'01a0024a-2850-…',1,'AQExfPmBs2PDMI23HwdKwnFY/yGoESzXb0BAPEk1nz9n…
+INSERT INTO secrets   VALUES(1,'01a0024a-2851-…',1,'AQFPkKYiNf23AnhW8KKdDOQnSx7IIgHt0IoqKEhx9atj…
 ```
 
-Boost provides your agent 15+ tools and skills that help agents build Laravel applications while following best practices.
+Grepping the whole dump for any of that plaintext returns nothing. The only readable columns are
+the identifier, the timestamps, the payload version and the key epoch — each one listed in
+[`docs/04-data-model.md`](docs/04-data-model.md) with the reason it is not encrypted. A
+[leak canary test](docs/06-testing-and-ci.md) asserts this on every commit, sweeping every table,
+log file, cache entry and storage disk for a sentinel value.
+
+## What it does not defend against
+
+**A compromised server can serve you malicious JavaScript.** No amount of browser-delivered
+cryptography fixes that, and any product claiming otherwise is not being straight with you. It is
+written down as adversary A3 in the [threat model](docs/02-threat-model.md), it is stated in the
+application's own interface, and it is the main argument for self-hosting this rather than trusting
+someone else's deployment.
+
+Other honest limitations:
+
+- **"Read-only" is a server-side rule, not a cryptographic one.** Every member of a vault holds the
+  Vault Key, so a viewer who wants a copy of a secret can take one. Roles stop people *changing*
+  things.
+- **Lose your password and your recovery kit and the data is gone.** There is no reset, because the
+  server cannot re-wrap a key it cannot unwrap. This is the cost of the design, not an oversight.
+- **The sharing graph is visible.** Who shares what with whom, and when. Hiding it needs private
+  information retrieval, which is out of scope.
+
+## Documentation
+
+Read in this order:
+
+| Doc | What it covers |
+| --- | --- |
+| [01 — Brief & Decisions](docs/01-brief-and-decisions.md) | Goals, scope, the twelve settled decisions and their rationale |
+| [02 — Threat Model](docs/02-threat-model.md) | Assets, adversaries, what is and is not protected, accepted leakage |
+| [03 — Cryptographic Design](docs/03-cryptographic-design.md) | Key hierarchy, primitives, envelope format, every protocol flow |
+| [04 — Data Model](docs/04-data-model.md) | Schema, and what each unencrypted column leaks |
+| [05 — Implementation Plan](docs/05-implementation-plan.md) | Thirteen phases, each with deliverables and exit criteria |
+| [06 — Testing & CI](docs/06-testing-and-ci.md) | The four tests that matter most, and the CI gates |
+| [adr/](docs/adr/) | Decision records — what was chosen, and what was rejected |
+
+## Status
+
+Phases 0–3 of [thirteen](docs/05-implementation-plan.md) are complete: a working single-user
+zero-knowledge vault.
+
+- **Phase 0** — Inertia + Vue + TypeScript strict, a nonce-based CSP enforced from the first
+  render, static analysis at maximum, CI gating every check.
+- **Phase 1** — the crypto core: envelope format with mandatory AAD binding, the key hierarchy,
+  sealed boxes, identities, and the crypto Worker. Verified against RFC vectors and cross-checked
+  byte-for-byte against PHP's `ext-sodium`.
+- **Phase 2** — invite-only registration, split-key login, the recovery kit, password change, TOTP,
+  and the unlock state machine.
+- **Phase 3** — vaults, lockboxes and secrets, end to end, plus the leak canary and the IDOR suite.
+
+Next is [Phase 4](docs/05-implementation-plan.md#phase-4--client-state-search--ux): client-side
+search, and measuring how far this scales before the "decrypt everything in the browser" approach
+becomes a problem.
+
+## Stack
+
+- **Backend** — Laravel 13, PHP 8.4 with `ext-sodium`, Pest 5, Larastan at max level
+- **Frontend** — Inertia 3 + Vue 3 + TypeScript (strict), Tailwind 4, Vite 8
+- **Crypto** — `@noble/ciphers`, `@noble/curves`, `@noble/hashes` in the browser. Audited, pure
+  TypeScript, no WASM — which is what lets the CSP stay free of `wasm-unsafe-eval`. **Nothing on
+  the server.**
+
+XChaCha20-Poly1305 for encryption, Argon2id for password stretching, HKDF-SHA256 for key
+derivation, X25519 for sealed boxes, Ed25519 for signatures, BLAKE2b for fingerprints.
+
+## Running it locally
+
+```bash
+composer setup      # install, key:generate, migrate, build assets
+php artisan dev     # serve, queue, logs and Vite together
+```
+
+Registration is invite-only, so the first account needs an invitation from the command line:
+
+```bash
+php artisan vault:invite you@example.com
+```
+
+That prints a single-use link. Open it, choose a master password, and **write down the recovery kit
+it gives you** — it is shown once, and nothing can reissue it if you lose the password too.
+
+### One thing to remember
+
+The crypto Worker is built to a fixed path rather than served through Vite, because a Worker must
+be same-origin with the page and the dev server is not. So it is **not hot-reloaded**:
+
+```bash
+npm run build:worker    # after changing anything in resources/js/crypto
+```
+
+That is a deliberate trade. The one part of this codebase that should never be swapped out
+invisibly is the part holding the keys.
+
+## Development
+
+```bash
+php artisan test              # Pest
+npm run test                  # Vitest
+npm run test:coverage         # enforces 100% coverage of resources/js/crypto
+npm run types                 # tsc --noEmit
+npm run lint                  # ESLint
+vendor/bin/pint               # formatting
+vendor/bin/phpstan analyse    # static analysis at max level
+```
+
+CI runs all of the above on every push. Several of the tests are load-bearing security controls
+rather than regression checks — the leak canary, the AAD-binding suite, the bit-flip integrity
+tests and the IDOR suite. [`docs/06`](docs/06-testing-and-ci.md) explains why each one exists.
+
+Settled decisions and non-obvious traps live in [`.ai/rules`](.ai/rules/), indexed by the paths they
+apply to, so they survive into future sessions instead of being rediscovered.
 
 ## Contributing
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+This is a personal learning project rather than something seeking contributors, but if you spot a
+flaw in the cryptographic design or the threat model I would genuinely like to know — that is the
+most useful thing anyone could offer it. Open an issue.
 
-## Code of Conduct
+## Licence
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+[MIT](LICENSE). Do what you like with it.
 
-## Security Vulnerabilities
-
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
-
-## License
-
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+**A caveat that matters more than the licence.** This has not been independently audited, and it is
+a project I built to learn how these systems are put together. Read the threat model before you
+trust it with anything you would mind losing.
