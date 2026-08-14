@@ -3,8 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "vite build",
-    "dev": "vite",
+    "build": "vite build && npm run build:worker",
+    "dev": "npm run build:worker && vite",
     "types": "vue-tsc --noEmit",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
@@ -12,7 +12,8 @@
     "format:check": "prettier --check .",
     "bench:argon2": "node benchmarks/argon2.mjs",
     "test": "vitest run",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "build:worker": "vite build --config vite.worker.config.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

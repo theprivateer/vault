@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { AadParams } from '../aad';
 import { deriveFromPassword, generateKdfSalt, generateKey, wrapKey } from '../keys';
 import { constantTimeEqual, utf8ToBytes } from '../primitives';
-import { CryptoClient, isIntegrityFailure } from './client';
+import { CryptoClient, WORKER_URL, isIntegrityFailure } from './client';
 import type { WorkerScope } from './handler';
 import { installHandler } from './handler';
 import type { Reply, Request } from './protocol';
@@ -321,13 +321,19 @@ describe('key isolation across the boundary', () => {
 });
 
 describe('default worker factory', () => {
-    it('constructs a module worker from the worker entry point', () => {
-        const constructed: Array<{ url: URL; options: WorkerOptions | undefined }> = [];
+    /*
+     | A same-origin path, not a URL resolved through the bundler. Worker scripts
+     | must be same-origin with the page, and under `npm run dev` Vite serves
+     | modules from a different port than Laravel serves the page — so a
+     | bundler-resolved URL cannot construct a Worker at all.
+     */
+    it('constructs a module worker from a same-origin path', () => {
+        const constructed: Array<{ url: string; options: WorkerOptions | undefined }> = [];
 
         vi.stubGlobal(
             'Worker',
             class {
-                constructor(url: URL, options?: WorkerOptions) {
+                constructor(url: string, options?: WorkerOptions) {
                     constructed.push({ url, options });
                 }
 
@@ -340,11 +346,20 @@ describe('default worker factory', () => {
             new CryptoClient().send({ op: 'status' }).catch(() => undefined);
 
             expect(constructed).toHaveLength(1);
-            expect(constructed[0]!.url.pathname).toContain('crypto.worker');
+            expect(constructed[0]!.url).toBe(WORKER_URL);
+            expect(WORKER_URL.startsWith('/')).toBe(true);
             expect(constructed[0]!.options).toEqual({ type: 'module' });
         } finally {
             vi.unstubAllGlobals();
         }
+    });
+
+    it('reports a worker that cannot be started, instead of failing generically', async () => {
+        const client = new CryptoClient(() => {
+            throw new Error('SecurityError: cross-origin worker');
+        });
+
+        await expect(client.status()).rejects.toThrow(/cryptographic worker could not be started/);
     });
 });
 

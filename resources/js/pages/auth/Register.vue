@@ -8,6 +8,7 @@ import TextField from '@/components/TextField.vue';
 import type { KdfParams } from '@/crypto/primitives';
 import AuthLayout from '@/layouts/AuthLayout.vue';
 import { toBase64 } from '@/lib/bytes';
+import { CryptoError } from '@/crypto/errors';
 import { HttpError, postJson } from '@/lib/http';
 import { uuid7 } from '@/lib/uuid';
 import { markAuthenticated, useSession } from '@/stores/session';
@@ -92,6 +93,10 @@ async function submit(): Promise<void> {
         if (cause instanceof HttpError) {
             errors.value = cause.errors;
             failure.value = cause.status === 422 ? '' : cause.message;
+        } else if (cause instanceof CryptoError) {
+            // Say what actually went wrong. A generic message here hides
+            // environment problems that look identical to real failures.
+            failure.value = cause.message;
         } else {
             failure.value = 'Something went wrong generating your keys. Please try again.';
         }

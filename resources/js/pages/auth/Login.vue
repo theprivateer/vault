@@ -8,6 +8,7 @@ import type { AadParams } from '@/crypto/aad';
 import type { KdfParams } from '@/crypto/primitives';
 import AuthLayout from '@/layouts/AuthLayout.vue';
 import { fromBase64, toBase64 } from '@/lib/bytes';
+import { CryptoError } from '@/crypto/errors';
 import { HttpError, postJson } from '@/lib/http';
 import { markAuthenticated, useSession } from '@/stores/session';
 
@@ -75,10 +76,13 @@ async function submit(): Promise<void> {
          | password and a wrong second factor, so neither can this. The
          | second-factor field is offered once, in case that is what is missing.
          */
-        failure.value =
-            cause instanceof HttpError
-                ? (cause.first('email') ?? 'Those credentials do not match our records.')
-                : 'Could not sign in. Please check your details and try again.';
+        if (cause instanceof HttpError) {
+            failure.value = cause.first('email') ?? 'Those credentials do not match our records.';
+        } else if (cause instanceof CryptoError) {
+            failure.value = cause.message;
+        } else {
+            failure.value = 'Could not sign in. Please check your details and try again.';
+        }
 
         needsSecondFactor.value = true;
     } finally {

@@ -59,3 +59,20 @@ export class KeyUnavailableError extends CryptoError {}
 
 /** A caller passed a value the crypto core refuses to operate on. */
 export class InvalidParameterError extends CryptoError {}
+
+/**
+ * The crypto Worker could not be started.
+ *
+ * Almost always an environment problem rather than a cryptographic one: the
+ * Worker script must be same-origin with the page, and a strict `worker-src`
+ * must allow it. Carries the cause so the reason is visible instead of
+ * surfacing as a generic "something went wrong".
+ */
+export class WorkerUnavailableError extends CryptoError {
+    constructor(
+        message: string,
+        override readonly cause?: unknown,
+    ) {
+        super(message);
+    }
+}

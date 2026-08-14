@@ -7,15 +7,32 @@
  * a garbage-collected runtime actually guarantees.
  */
 import type { AadParams } from '../aad';
-import { CryptoError, InvalidParameterError, KeyUnavailableError, MalformedEnvelopeError } from '../errors';
+import {
+    CryptoError,
+    InvalidParameterError,
+    KeyUnavailableError,
+    MalformedEnvelopeError,
+    WorkerUnavailableError,
+} from '../errors';
 import type { RegistrationResult } from './keyring';
 import type { KeyHandle, Reply, Request, SerialisedError } from './protocol';
 
 /** Injectable so tests can supply a fake in place of a real Worker. */
 export type WorkerFactory = () => Worker;
 
-const defaultFactory: WorkerFactory = () =>
-    new Worker(new URL('./crypto.worker.ts', import.meta.url), { type: 'module' });
+/**
+ * A stable, same-origin path rather than a URL resolved through Vite.
+ *
+ * Worker scripts must be same-origin with the page. In development Vite serves
+ * modules from its own port while Laravel serves the page from another, so
+ * `new URL('./crypto.worker.ts', import.meta.url)` yields a cross-origin URL
+ * the browser refuses to construct a Worker from. Building the Worker to a
+ * fixed path (see vite.worker.config.ts) makes development and production
+ * behave identically and keeps `worker-src 'self'` intact.
+ */
+export const WORKER_URL = '/build/crypto.worker.js';
+
+const defaultFactory: WorkerFactory = () => new Worker(WORKER_URL, { type: 'module' });
 
 /**
  * Errors whose constructors take a single message, so they can be rebuilt
@@ -171,7 +188,25 @@ export class CryptoClient {
             return this.worker;
         }
 
-        const worker = this.factory();
+        let worker: Worker;
+
+        try {
+            worker = this.factory();
+        } catch (cause) {
+            /*
+             | Worker scripts must be same-origin with the page. Under `npm run
+             | dev` Vite serves modules from its own port while Laravel serves
+             | the page from another, so the Worker cannot be constructed at
+             | all — which is why the Worker is built to a stable same-origin
+             | path instead of being resolved through the dev server.
+             */
+            throw new WorkerUnavailableError(
+                'The cryptographic worker could not be started. It must be served from the same ' +
+                    'origin as the page, and permitted by the worker-src policy. ' +
+                    'If you are developing, run `npm run build:worker`.',
+                cause,
+            );
+        }
 
         worker.onmessage = ({ data }: MessageEvent<Reply>) => {
             const entry = this.pending.get(data.id);
