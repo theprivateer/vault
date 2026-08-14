@@ -50,4 +50,8 @@ opaque to the server; search happens in the browser.
   `ext-sodium`. Argon2id measured at 731 ms, so the CSP stays free of `wasm-unsafe-eval`
   ([ADR-0003](adr/0003-argon2id-implementation.md)).
 
-Next: [Phase 2 — identity, unlock & recovery](05-implementation-plan.md#phase-2--identity-unlock--recovery).
+- **Phase 2** — identity, unlock and recovery. Invite-only registration, split-key login, the
+  recovery kit, password change, TOTP second factor, and the unlock state machine. Monochrome
+  monospace interface with `rounded-*` and `shadow-*` removed at the token level.
+
+Next: [Phase 3 — vaults, lockboxes, secrets](05-implementation-plan.md#phase-3--vaults-lockboxes-secrets).

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { AadParams } from '../aad';
 import { IntegrityError, KeyUnavailableError } from '../errors';
+import { computeFingerprint, verifyPublicKeys } from '../identity';
 import { deriveFromPassword, generateKdfSalt, generateKey, wrapKey } from '../keys';
 import { utf8ToBytes } from '../primitives';
 import { Keyring } from './keyring';
@@ -196,5 +197,227 @@ describe('operations', () => {
         );
 
         expect(keyring.handles).toEqual(['vault', USER_KEY].sort());
+    });
+});
+
+describe('registration', () => {
+    const UUID = '0192f3a1-4b2c-7d3e-8f90-a1b2c3d4e5f6';
+
+    const register = (keyring: Keyring, password = 'correct horse battery staple') =>
+        keyring.register({ password, kdfSalt: generateKdfSalt(), kdfParams: FAST_KDF, uuid: UUID });
+
+    it('produces every blob the server needs to store', () => {
+        const result = register(new Keyring());
+
+        expect(result.authKey).toHaveLength(32);
+        expect(result.x25519PublicKey).toHaveLength(32);
+        expect(result.ed25519PublicKey).toHaveLength(32);
+        expect(result.selfSignature).toHaveLength(64);
+        expect(result.fingerprint).toHaveLength(32);
+        expect(result.recoverySalt).toHaveLength(16);
+        expect(result.recoveryCode).toMatch(/^([0-9A-HJKMNP-TV-Z]{4}-){6}[0-9A-HJKMNP-TV-Z]{2}$/);
+    });
+
+    it('leaves the new account unlocked', () => {
+        const keyring = new Keyring();
+        register(keyring);
+
+        expect(keyring.unlocked).toBe(true);
+    });
+
+    it('publishes a verifiable identity', () => {
+        const result = register(new Keyring());
+
+        expect(verifyPublicKeys(result.selfSignature, result.ed25519PublicKey, result.x25519PublicKey)).toBe(
+            true,
+        );
+        expect(computeFingerprint(result.ed25519PublicKey, result.x25519PublicKey)).toEqual(
+            result.fingerprint,
+        );
+    });
+
+    it('encrypts the private keys so only the User Key opens them', () => {
+        const keyring = new Keyring();
+        const result = register(keyring);
+
+        // Decryptable through the keyring, which holds the User Key...
+        expect(
+            keyring.open(USER_KEY, result.x25519PrivateKeyCt, {
+                context: 'user.privkey.x25519',
+                subject: UUID,
+                version: 1,
+            }),
+        ).toHaveLength(32);
+
+        // ...and bound to their own context, so they are not interchangeable.
+        expect(() =>
+            keyring.open(USER_KEY, result.x25519PrivateKeyCt, {
+                context: 'user.privkey.ed25519',
+                subject: UUID,
+                version: 1,
+            }),
+        ).toThrow(IntegrityError);
+    });
+
+    it('is unlockable afterwards by password', () => {
+        const keyring = new Keyring();
+        const kdfSalt = generateKdfSalt();
+        const result = keyring.register({
+            password: 'correct horse',
+            kdfSalt,
+            kdfParams: FAST_KDF,
+            uuid: UUID,
+        });
+
+        const fresh = new Keyring();
+        fresh.unlock({
+            password: 'correct horse',
+            kdfSalt,
+            kdfParams: FAST_KDF,
+            wrappedUserKey: result.wrappedUserKey,
+            userKeyAad: { context: 'user.userkey', subject: UUID, version: 1 },
+        });
+
+        expect(fresh.unlocked).toBe(true);
+    });
+
+    it('is unlockable afterwards by recovery code', () => {
+        const result = register(new Keyring());
+
+        const fresh = new Keyring();
+        fresh.unlockWithRecovery(result.recoveryCode, result.recoverySalt, result.recoveryWrappedUserKey, {
+            context: 'user.userkey',
+            subject: UUID,
+            version: 1,
+        });
+
+        expect(fresh.unlocked).toBe(true);
+    });
+
+    it('rejects the wrong recovery code', () => {
+        const result = register(new Keyring());
+
+        expect(() =>
+            new Keyring().unlockWithRecovery(
+                'ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZZZZ-ZZ',
+                result.recoverySalt,
+                result.recoveryWrappedUserKey,
+                { context: 'user.userkey', subject: UUID, version: 1 },
+            ),
+        ).toThrow(IntegrityError);
+    });
+
+    it('discards any previous session', () => {
+        const keyring = new Keyring();
+        keyring.unlock(account());
+        register(keyring);
+
+        expect(keyring.handles).toEqual([USER_KEY]);
+    });
+});
+
+describe('password change', () => {
+    const UUID = '0192f3a1-4b2c-7d3e-8f90-a1b2c3d4e5f6';
+    const userKeyAad = { context: 'user.userkey', subject: UUID, version: 1 } as const;
+
+    it('re-wraps the same User Key under a new password', () => {
+        const keyring = new Keyring();
+        const original = keyring.register({
+            password: 'old password',
+            kdfSalt: generateKdfSalt(),
+            kdfParams: FAST_KDF,
+            uuid: UUID,
+        });
+
+        const newSalt = generateKdfSalt();
+        const rewrapped = keyring.rewrapForPassword('new password', newSalt, FAST_KDF, userKeyAad);
+
+        const fresh = new Keyring();
+        fresh.unlock({
+            password: 'new password',
+            kdfSalt: newSalt,
+            kdfParams: FAST_KDF,
+            wrappedUserKey: rewrapped.wrappedUserKey,
+            userKeyAad,
+        });
+
+        expect(fresh.unlocked).toBe(true);
+
+        // The identity ciphertexts were produced under the User Key, and the
+        // User Key did not change — so they still open. This is the property
+        // that makes a password change cheap.
+        expect(
+            fresh.open(USER_KEY, original.ed25519PrivateKeyCt, {
+                context: 'user.privkey.ed25519',
+                subject: UUID,
+                version: 1,
+            }),
+        ).toHaveLength(32);
+    });
+
+    it('leaves the old password unable to unwrap the new wrapping', () => {
+        const keyring = new Keyring();
+        const kdfSalt = generateKdfSalt();
+        keyring.register({ password: 'old password', kdfSalt, kdfParams: FAST_KDF, uuid: UUID });
+
+        const rewrapped = keyring.rewrapForPassword('new password', generateKdfSalt(), FAST_KDF, userKeyAad);
+
+        expect(() =>
+            new Keyring().unlock({
+                password: 'old password',
+                kdfSalt,
+                kdfParams: FAST_KDF,
+                wrappedUserKey: rewrapped.wrappedUserKey,
+                userKeyAad,
+            }),
+        ).toThrow(IntegrityError);
+    });
+
+    it('refuses to re-wrap while locked', () => {
+        expect(() => new Keyring().rewrapForPassword('new', generateKdfSalt(), FAST_KDF, userKeyAad)).toThrow(
+            KeyUnavailableError,
+        );
+    });
+});
+
+describe('recovery kit reissue', () => {
+    const UUID = '0192f3a1-4b2c-7d3e-8f90-a1b2c3d4e5f6';
+    const userKeyAad = { context: 'user.userkey', subject: UUID, version: 1 } as const;
+
+    it('issues a kit that opens the same User Key', () => {
+        const keyring = new Keyring();
+        keyring.register({
+            password: 'correct horse',
+            kdfSalt: generateKdfSalt(),
+            kdfParams: FAST_KDF,
+            uuid: UUID,
+        });
+
+        const kit = keyring.issueRecoveryKit(userKeyAad);
+
+        const fresh = new Keyring();
+        fresh.unlockWithRecovery(kit.recoveryCode, kit.recoverySalt, kit.recoveryWrappedUserKey, userKeyAad);
+
+        expect(fresh.unlocked).toBe(true);
+    });
+
+    it('invalidates nothing on the server, but produces a different code each time', () => {
+        const keyring = new Keyring();
+        keyring.register({
+            password: 'correct horse',
+            kdfSalt: generateKdfSalt(),
+            kdfParams: FAST_KDF,
+            uuid: UUID,
+        });
+
+        const codes = new Set(
+            Array.from({ length: 5 }, () => keyring.issueRecoveryKit(userKeyAad).recoveryCode),
+        );
+
+        expect(codes.size).toBe(5);
+    });
+
+    it('refuses to issue a kit while locked', () => {
+        expect(() => new Keyring().issueRecoveryKit(userKeyAad)).toThrow(KeyUnavailableError);
     });
 });

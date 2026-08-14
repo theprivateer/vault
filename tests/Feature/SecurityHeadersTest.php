@@ -1,6 +1,9 @@
 <?php
 
 /**
+ * Exercised against /login because it renders a real Inertia page with the Vite
+ * bundle — the nonce assertion needs actual script tags, not a redirect.
+ *
  * Guards SR10 in docs/02-threat-model.md: the application must set a strict CSP
  * with no `unsafe-inline` or `unsafe-eval` in `script-src`.
  *
@@ -8,18 +11,18 @@
  * for convenience should fail the build rather than pass review.
  */
 it('sets a content security policy', function () {
-    $response = $this->get('/');
+    $response = $this->get('/login');
 
     $response->assertOk();
     $response->assertHeader('Content-Security-Policy');
 });
 
 it('does not allow inline or eval script execution', function (string $forbidden) {
-    expect(cspDirectives($this->get('/'))['script-src'])->not->toContain($forbidden);
+    expect(cspDirectives($this->get('/login'))['script-src'])->not->toContain($forbidden);
 })->with(["'unsafe-inline'", "'unsafe-eval'", "'unsafe-hashes'", 'http:', 'https:', '*']);
 
 it('locks down the directives that make XSS exploitable', function (string $directive, string $expected) {
-    $directives = cspDirectives($this->get('/'));
+    $directives = cspDirectives($this->get('/login'));
 
     expect($directives)->toHaveKey($directive)
         ->and($directives[$directive])->toBe($expected);
@@ -36,7 +39,7 @@ it('locks down the directives that make XSS exploitable', function (string $dire
 ]);
 
 it('issues a nonce that matches the one on the rendered script tag', function () {
-    $response = $this->get('/');
+    $response = $this->get('/login');
 
     expect(cspDirectives($response)['script-src'])
         ->toMatch("/^'nonce-[A-Za-z0-9+\/=]+' 'strict-dynamic'$/");
@@ -47,7 +50,7 @@ it('issues a nonce that matches the one on the rendered script tag', function ()
 });
 
 it('sets the remaining security headers', function (string $header, string $expected) {
-    $this->get('/')->assertHeader($header, $expected);
+    $this->get('/login')->assertHeader($header, $expected);
 })->with([
     ['X-Content-Type-Options', 'nosniff'],
     ['X-Frame-Options', 'DENY'],
@@ -57,12 +60,12 @@ it('sets the remaining security headers', function (string $header, string $expe
 ]);
 
 it('denies powerful browser features by default', function (string $feature) {
-    expect($this->get('/')->headers->get('Permissions-Policy'))->toContain("{$feature}=()");
+    expect($this->get('/login')->headers->get('Permissions-Policy'))->toContain("{$feature}=()");
 })->with(['camera', 'microphone', 'geolocation', 'usb', 'payment', 'serial']);
 
 it('sends HSTS only over https', function () {
-    $this->get('/')->assertHeaderMissing('Strict-Transport-Security');
+    $this->get('/login')->assertHeaderMissing('Strict-Transport-Security');
 
-    $this->get('https://localhost/')
+    $this->get('https://localhost/login')
         ->assertHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');
 });

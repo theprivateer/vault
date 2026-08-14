@@ -4,14 +4,181 @@
 @source '../../storage/framework/views/*.php';
 
 /*
- | Fonts are the system stack, deliberately. Remote webfonts (the default
- | Bunny Fonts setup) would require loosening `style-src`/`font-src` to a
- | third-party host and would leak every visitor's IP address to it. See
+ | The visual language: monospace throughout, monochrome, one orange accent.
+ |
+ | The radius and shadow namespaces are emptied rather than merely avoided, so
+ | `rounded-*` and `shadow-*` utilities do not exist. Structure comes from rules
+ | and space instead. Same reasoning for the colour palette: the default Tailwind
+ | colours are removed so the monochrome discipline cannot drift.
+ |
+ | Fonts are the system monospace stack. Remote webfonts would need a third-party
+ | host in style-src/font-src and would leak every visitor's IP to it — see
  | docs/02-threat-model.md.
  */
 @theme {
-    --font-sans:
-        ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif,
-        'Apple Color Emoji', 'Segoe UI Emoji';
+    --color-*: initial;
+    --radius-*: initial;
+    --shadow-*: initial;
+    --font-*: initial;
+
+    --font-sans: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
     --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+
+    --color-transparent: transparent;
+    --color-current: currentColor;
+    --color-black: #000000;
+    --color-white: #ffffff;
+
+    /* Surfaces and ink. */
+    --color-paper: #fcfcfb;
+    --color-surface: #ffffff;
+    --color-sunken: #f2f1ee;
+    --color-ink: #16150f;
+    --color-muted: #6f6d64;
+    --color-faint: #9b998f;
+    --color-line: #dcdad2;
+    --color-line-strong: #16150f;
+
+    /* The one splash of colour. Used for focus, the active state, and danger. */
+    --color-accent: #d9540d;
+    --color-accent-ink: #ffffff;
+    --color-accent-wash: #fdf1e8;
+
+    --text-2xs: 0.6875rem;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --color-paper: #0d0d0c;
+        --color-surface: #141413;
+        --color-sunken: #1c1c1a;
+        --color-ink: #e8e6df;
+        --color-muted: #918e84;
+        --color-faint: #6a6860;
+        --color-line: #2b2a27;
+        --color-line-strong: #e8e6df;
+
+        --color-accent: #ff7a2f;
+        --color-accent-ink: #0d0d0c;
+        --color-accent-wash: #241a12;
+    }
+}
+
+@layer base {
+    html {
+        color-scheme: light dark;
+        -webkit-text-size-adjust: 100%;
+    }
+
+    body {
+        background-color: var(--color-paper);
+        color: var(--color-ink);
+        font-family: var(--font-mono);
+        font-size: 0.875rem;
+        line-height: 1.6;
+        font-variant-ligatures: none;
+    }
+
+    /* One focus treatment everywhere, in the accent, never removed. */
+    :focus-visible {
+        outline: 2px solid var(--color-accent);
+        outline-offset: 2px;
+    }
+
+    ::selection {
+        background-color: var(--color-accent);
+        color: var(--color-accent-ink);
+    }
+
+    ::placeholder {
+        color: var(--color-faint);
+    }
+}
+
+@layer components {
+    /*
+     | Inputs carry a single rule underneath rather than a box: less furniture,
+     | and it keeps the eye on the value, which is what matters in a vault.
+     */
+    .field {
+        width: 100%;
+        border: 1px solid var(--color-line);
+        background-color: var(--color-surface);
+        padding: 0.5rem 0.625rem;
+        color: var(--color-ink);
+        font-family: var(--font-mono);
+        font-size: 0.875rem;
+    }
+
+    .field:focus {
+        border-color: var(--color-accent);
+        outline: none;
+    }
+
+    .field[aria-invalid='true'] {
+        border-color: var(--color-accent);
+    }
+
+    .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+        border: 1px solid var(--color-line-strong);
+        padding: 0.5rem 1rem;
+        font-family: var(--font-mono);
+        font-size: 0.8125rem;
+        letter-spacing: 0.02em;
+        text-transform: lowercase;
+        cursor: pointer;
+        background-color: transparent;
+        color: var(--color-ink);
+    }
+
+    .btn:hover:not(:disabled) {
+        background-color: var(--color-ink);
+        color: var(--color-paper);
+    }
+
+    .btn:disabled {
+        cursor: not-allowed;
+        border-color: var(--color-line);
+        color: var(--color-faint);
+    }
+
+    .btn-primary {
+        border-color: var(--color-accent);
+        background-color: var(--color-accent);
+        color: var(--color-accent-ink);
+    }
+
+    .btn-primary:hover:not(:disabled) {
+        background-color: transparent;
+        color: var(--color-accent);
+    }
+
+    .btn-primary:disabled {
+        border-color: var(--color-line);
+        background-color: transparent;
+        color: var(--color-faint);
+    }
+
+    .label {
+        display: block;
+        margin-bottom: 0.375rem;
+        color: var(--color-muted);
+        font-size: var(--text-2xs);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+    }
+
+    .panel {
+        border: 1px solid var(--color-line);
+        background-color: var(--color-surface);
+    }
+
+    .rule {
+        border: 0;
+        border-top: 1px solid var(--color-line);
+    }
 }

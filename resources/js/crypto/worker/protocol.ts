@@ -32,6 +32,32 @@ export type Request =
           wrappedUserKey: Uint8Array;
           userKeyAad: AadParams;
       }
+    /*
+     | Login is two steps, because the wrapped User Key is only returned after
+     | the server has accepted the auth key. Deriving once and holding the KEK
+     | inside the Worker avoids running Argon2id twice, which at production
+     | parameters would add roughly three quarters of a second to every login
+     | for no security benefit.
+     */
+    | { op: 'beginUnlock'; password: string; kdfSalt: Uint8Array; kdfParams: KdfParams }
+    | { op: 'completeUnlock'; wrappedUserKey: Uint8Array; userKeyAad: AadParams }
+    | { op: 'register'; password: string; kdfSalt: Uint8Array; kdfParams: KdfParams; uuid: string }
+    | { op: 'beginRecovery'; recoveryCode: string; recoverySalt: Uint8Array }
+    | {
+          op: 'unlockWithRecovery';
+          recoveryCode: string;
+          recoverySalt: Uint8Array;
+          wrappedUserKey: Uint8Array;
+          userKeyAad: AadParams;
+      }
+    | {
+          op: 'rewrapForPassword';
+          password: string;
+          kdfSalt: Uint8Array;
+          kdfParams: KdfParams;
+          userKeyAad: AadParams;
+      }
+    | { op: 'issueRecoveryKit'; userKeyAad: AadParams }
     | { op: 'lock' }
     | { op: 'status' }
     | { op: 'seal'; handle: KeyHandle; plaintext: Uint8Array; aad: AadParams }
@@ -42,7 +68,9 @@ export type ResponseFor<R extends Request['op']> = R extends 'status'
     ? { unlocked: boolean; handles: KeyHandle[] }
     : R extends 'seal' | 'open'
       ? { bytes: Uint8Array }
-      : Record<string, never>;
+      : R extends 'beginUnlock'
+        ? { authKey: Uint8Array }
+        : Record<string, never>;
 
 export interface Envelope<T> {
     /** Correlates a response with its request. */

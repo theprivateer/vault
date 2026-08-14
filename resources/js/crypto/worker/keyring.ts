@@ -4,10 +4,18 @@
  * Kept as a plain, testable object rather than module-level state so the Worker
  * glue stays trivial and this logic can be exercised directly.
  */
-import type { AadParams } from '../aad';
+import type { AadContext, AadParams } from '../aad';
 import { open, seal } from '../envelope';
 import { KeyUnavailableError } from '../errors';
-import { deriveFromPassword, unwrapKey } from '../keys';
+import { generateIdentity } from '../identity';
+import {
+    deriveFromPassword,
+    deriveRecoveryKeys,
+    generateKey,
+    generateRecoveryCode,
+    unwrapKey,
+    wrapKey,
+} from '../keys';
 import type { KdfParams } from '../primitives';
 import { zeroise } from '../primitives';
 import type { KeyHandle } from './protocol';
@@ -21,8 +29,39 @@ export interface UnlockRequest {
     userKeyAad: AadParams;
 }
 
+export interface RegistrationRequest {
+    password: string;
+    kdfSalt: Uint8Array;
+    kdfParams: KdfParams;
+    /** Client-generated, so the AAD can bind before the row exists. */
+    uuid: string;
+}
+
+export interface RegistrationResult {
+    authKey: Uint8Array;
+    wrappedUserKey: Uint8Array;
+    /** The one secret that must leave the Worker: the user has to write it down. */
+    recoveryCode: string;
+    recoverySalt: Uint8Array;
+    recoveryWrappedUserKey: Uint8Array;
+    /** Lets the server verify a recovery attempt without learning the code. */
+    recoveryAuthKey: Uint8Array;
+    x25519PublicKey: Uint8Array;
+    ed25519PublicKey: Uint8Array;
+    x25519PrivateKeyCt: Uint8Array;
+    ed25519PrivateKeyCt: Uint8Array;
+    selfSignature: Uint8Array;
+    fingerprint: Uint8Array;
+}
+
 export class Keyring {
     private readonly keys = new Map<KeyHandle, Uint8Array>();
+
+    /**
+     * Held between beginUnlock and completeUnlock during login, and at no other
+     * time. Discarded the moment the User Key is unwrapped.
+     */
+    private pendingKek: Uint8Array | null = null;
 
     get unlocked(): boolean {
         return this.keys.has(USER_KEY);
@@ -49,6 +88,160 @@ export class Keyring {
             this.keys.set(USER_KEY, unwrapKey(kek, wrappedUserKey, userKeyAad));
         } finally {
             zeroise(kek, authKey);
+        }
+    }
+
+    /**
+     * Creates a whole account: User Key, identity keypairs, recovery kit.
+     *
+     * Everything is generated and wrapped in here. What comes back is the
+     * ciphertext the server will store, plus the recovery code — which has to
+     * leave, because its entire purpose is to be shown to the user once and
+     * written down. The User Key and both private keys never do.
+     *
+     * The account is left unlocked, since the user just proved they know the
+     * password by choosing it.
+     */
+    register({ password, kdfSalt, kdfParams, uuid }: RegistrationRequest): RegistrationResult {
+        this.lock();
+
+        const { kek, authKey } = deriveFromPassword(password, kdfSalt, kdfParams);
+        const userKey = generateKey();
+        const identity = generateIdentity();
+        const recovery = generateRecoveryCode();
+
+        const aad = (context: AadContext): AadParams => ({ context, subject: uuid, version: 1 });
+
+        try {
+            return {
+                authKey,
+                wrappedUserKey: wrapKey(kek, userKey, aad('user.userkey')),
+                recoveryCode: recovery.formatted,
+                recoverySalt: recovery.salt,
+                recoveryWrappedUserKey: wrapKey(recovery.kek, userKey, aad('user.userkey')),
+                recoveryAuthKey: recovery.authKey,
+                x25519PublicKey: identity.x25519.publicKey,
+                ed25519PublicKey: identity.ed25519.publicKey,
+                x25519PrivateKeyCt: seal(userKey, identity.x25519.secretKey, aad('user.privkey.x25519')),
+                ed25519PrivateKeyCt: seal(userKey, identity.ed25519.secretKey, aad('user.privkey.ed25519')),
+                selfSignature: identity.selfSignature,
+                fingerprint: identity.fingerprint,
+            };
+        } finally {
+            this.keys.set(USER_KEY, userKey);
+            zeroise(kek, recovery.kek, identity.x25519.secretKey, identity.ed25519.secretKey);
+        }
+    }
+
+    /**
+     * Step one of recovery, mirroring beginUnlock.
+     *
+     * Splits the recovery code, retains the KEK, and returns only the auth key
+     * for the server to verify. `completeUnlock` finishes the job once the
+     * server has handed back the wrapping.
+     */
+    beginRecovery(recoveryCode: string, recoverySalt: Uint8Array): Uint8Array {
+        this.lock();
+
+        const { kek, authKey } = deriveRecoveryKeys(recoveryCode, recoverySalt);
+
+        this.pendingKek = kek;
+
+        return authKey;
+    }
+
+    /** Unlocks using the recovery kit instead of the password, in one step. */
+    unlockWithRecovery(
+        recoveryCode: string,
+        recoverySalt: Uint8Array,
+        wrappedUserKey: Uint8Array,
+        aad: AadParams,
+    ): void {
+        this.lock();
+
+        const { kek, authKey } = deriveRecoveryKeys(recoveryCode, recoverySalt);
+
+        try {
+            this.keys.set(USER_KEY, unwrapKey(kek, wrappedUserKey, aad));
+        } finally {
+            zeroise(kek, authKey);
+        }
+    }
+
+    /**
+     * Re-wraps the held User Key under a new password.
+     *
+     * Only the wrapping changes. The User Key itself, the identity keys and
+     * every vault key stay exactly as they were — which is the whole reason the
+     * User Key indirection exists.
+     */
+    rewrapForPassword(
+        password: string,
+        kdfSalt: Uint8Array,
+        kdfParams: KdfParams,
+        aad: AadParams,
+    ): { authKey: Uint8Array; wrappedUserKey: Uint8Array } {
+        const userKey = this.require(USER_KEY);
+        const { kek, authKey } = deriveFromPassword(password, kdfSalt, kdfParams);
+
+        try {
+            return { authKey, wrappedUserKey: wrapKey(kek, userKey, aad) };
+        } finally {
+            zeroise(kek);
+        }
+    }
+
+    /** Issues a fresh recovery kit for the currently held User Key. */
+    issueRecoveryKit(aad: AadParams): {
+        recoveryCode: string;
+        recoverySalt: Uint8Array;
+        recoveryWrappedUserKey: Uint8Array;
+        recoveryAuthKey: Uint8Array;
+    } {
+        const userKey = this.require(USER_KEY);
+        const recovery = generateRecoveryCode();
+
+        try {
+            return {
+                recoveryCode: recovery.formatted,
+                recoverySalt: recovery.salt,
+                recoveryWrappedUserKey: wrapKey(recovery.kek, userKey, aad),
+                recoveryAuthKey: recovery.authKey,
+            };
+        } finally {
+            zeroise(recovery.kek);
+        }
+    }
+
+    /**
+     * Derives from the password and returns only the auth key.
+     *
+     * The KEK is retained inside the Worker so the caller can finish unlocking
+     * once the server has returned the wrapped User Key, without paying for a
+     * second Argon2id run. The auth key is the only thing that leaves.
+     */
+    beginUnlock(password: string, kdfSalt: Uint8Array, kdfParams: KdfParams): Uint8Array {
+        this.lock();
+
+        const { kek, authKey } = deriveFromPassword(password, kdfSalt, kdfParams);
+
+        this.pendingKek = kek;
+
+        return authKey;
+    }
+
+    /** Finishes a login begun by beginUnlock, using the retained KEK. */
+    completeUnlock(wrappedUserKey: Uint8Array, aad: AadParams): void {
+        if (!this.pendingKek) {
+            throw new KeyUnavailableError(
+                'No unlock is in progress. beginUnlock must be called before completeUnlock.',
+            );
+        }
+
+        try {
+            this.keys.set(USER_KEY, unwrapKey(this.pendingKek, wrappedUserKey, aad));
+        } finally {
+            this.discardPendingKek();
         }
     }
 
@@ -94,6 +287,14 @@ export class Keyring {
         }
 
         this.keys.clear();
+        this.discardPendingKek();
+    }
+
+    private discardPendingKek(): void {
+        if (this.pendingKek) {
+            zeroise(this.pendingKek);
+            this.pendingKek = null;
+        }
     }
 
     private require(handle: KeyHandle): Uint8Array {

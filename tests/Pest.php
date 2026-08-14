@@ -16,7 +16,7 @@ use Tests\TestCase;
 */
 
 pest()->extend(TestCase::class)
- // ->use(RefreshDatabase::class)
+    ->use(RefreshDatabase::class)
     ->in('Feature');
 
 /*
@@ -76,4 +76,41 @@ function cspNonce(TestResponse $response): string
     preg_match("/'nonce-([^']+)'/", cspDirectives($response)['script-src'] ?? '', $matches);
 
     return $matches[1] ?? '';
+}
+
+/**
+ * Reads a string from a JSON response body.
+ *
+ * `json()` is typed as mixed, and the guard here is a real assertion: a key
+ * that is missing or not a string is a test failure worth seeing directly.
+ *
+ * @template TResponse of \Symfony\Component\HttpFoundation\Response
+ *
+ * @param  TestResponse<TResponse>  $response
+ */
+function jsonString(TestResponse $response, string $key): string
+{
+    $value = $response->json($key);
+
+    if (! is_string($value)) {
+        throw new InvalidArgumentException("Response key [{$key}] is not a string.");
+    }
+
+    return $value;
+}
+
+/**
+ * Reads a string from a test payload array.
+ *
+ * @param  array<string, mixed>  $payload
+ */
+function payloadString(array $payload, string $key): string
+{
+    $value = $payload[$key] ?? null;
+
+    if (! is_string($value)) {
+        throw new InvalidArgumentException("Payload key [{$key}] is not a string.");
+    }
+
+    return $value;
 }

@@ -5,7 +5,7 @@ import { seal } from './envelope';
 import { IntegrityError, InvalidParameterError, MalformedEnvelopeError } from './errors';
 import {
     deriveFromPassword,
-    deriveRecoveryKek,
+    deriveRecoveryKeys,
     generateKdfSalt,
     generateKey,
     generateRecoveryCode,
@@ -121,7 +121,7 @@ describe('recovery codes', () => {
         // 128 bits encodes to 26 base32 characters: six groups of four, then two.
         expect(formatted).toMatch(/^([0-9A-HJKMNP-TV-Z]{4}-){6}[0-9A-HJKMNP-TV-Z]{2}$/);
         expect(kek).toHaveLength(KEY_LENGTH);
-        expect(deriveRecoveryKek(formatted, salt)).toEqual(kek);
+        expect(deriveRecoveryKeys(formatted, salt).kek).toEqual(kek);
     });
 
     it('is different every time', () => {
@@ -137,15 +137,15 @@ describe('recovery codes', () => {
     ])('accepts the code typed back %s', (_label, transform) => {
         const { formatted, kek, salt } = generateRecoveryCode();
 
-        expect(deriveRecoveryKek(transform(formatted), salt)).toEqual(kek);
+        expect(deriveRecoveryKeys(transform(formatted), salt).kek).toEqual(kek);
     });
 
     it('folds the ambiguous characters a human would mistype', () => {
         // Crockford omits I, L and O precisely because they are misread as 1 and 0.
         const { salt } = generateRecoveryCode();
 
-        expect(deriveRecoveryKek('OIOI-OIOI-OIOI-OIOI-OIOI-OIOI-OI', salt)).toEqual(
-            deriveRecoveryKek('0101-0101-0101-0101-0101-0101-01', salt),
+        expect(deriveRecoveryKeys('OIOI-OIOI-OIOI-OIOI-OIOI-OIOI-OI', salt)).toEqual(
+            deriveRecoveryKeys('0101-0101-0101-0101-0101-0101-01', salt),
         );
     });
 
@@ -154,7 +154,7 @@ describe('recovery codes', () => {
 
         // Folding U to something else would silently corrupt the code and
         // present as an unexplained failure to unlock.
-        expect(() => deriveRecoveryKek('UUUU-UUUU-UUUU-UUUU-UUUU-UUUU-UU', salt)).toThrow(
+        expect(() => deriveRecoveryKeys('UUUU-UUUU-UUUU-UUUU-UUUU-UUUU-UU', salt)).toThrow(
             InvalidParameterError,
         );
     });
@@ -162,13 +162,13 @@ describe('recovery codes', () => {
     it('rejects a code of the wrong length', () => {
         const { salt } = generateRecoveryCode();
 
-        expect(() => deriveRecoveryKek('ABCD-EFGH', salt)).toThrow(InvalidParameterError);
+        expect(() => deriveRecoveryKeys('ABCD-EFGH', salt)).toThrow(InvalidParameterError);
     });
 
     it('rejects a code containing an invalid character', () => {
         const { salt } = generateRecoveryCode();
 
-        expect(() => deriveRecoveryKek('ABCD-EFGH-JKMN-PQRS-TVWX-YZAB-C!', salt)).toThrow(
+        expect(() => deriveRecoveryKeys('ABCD-EFGH-JKMN-PQRS-TVWX-YZAB-C!', salt)).toThrow(
             InvalidParameterError,
         );
     });
@@ -243,5 +243,36 @@ describe('sealed boxes', () => {
 
     it('refuses a recipient key of the wrong length', () => {
         expect(() => sealTo(new Uint8Array(31), generateKey(), sealAad)).toThrow(InvalidParameterError);
+    });
+});
+
+describe('recovery key separation', () => {
+    /*
+     | The same split as the password (D4): the server must be able to verify a
+     | recovery attempt without learning anything that unwraps the User Key.
+     | If these two were equal, handing the auth key to the server would hand it
+     | the KEK — and the server already holds the wrapped key.
+     */
+    it('derives an encryption key and an auth key that are independent', () => {
+        const { formatted, salt, kek, authKey } = generateRecoveryCode();
+
+        expect(kek).toHaveLength(KEY_LENGTH);
+        expect(authKey).toHaveLength(KEY_LENGTH);
+        expect(kek).not.toEqual(authKey);
+
+        const rederived = deriveRecoveryKeys(formatted, salt);
+
+        expect(rederived.kek).toEqual(kek);
+        expect(rederived.authKey).toEqual(authKey);
+    });
+
+    it('separates the two by salt as well as by info', () => {
+        const { formatted } = generateRecoveryCode();
+
+        const first = deriveRecoveryKeys(formatted, generateKdfSalt());
+        const second = deriveRecoveryKeys(formatted, generateKdfSalt());
+
+        expect(first.kek).not.toEqual(second.kek);
+        expect(first.authKey).not.toEqual(second.authKey);
     });
 });

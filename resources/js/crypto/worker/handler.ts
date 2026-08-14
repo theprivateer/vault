@@ -20,6 +20,43 @@ export function createHandler(keyring: Keyring = new Keyring()): Handler {
 
                 return {};
 
+            case 'beginUnlock':
+                return {
+                    authKey: keyring.beginUnlock(request.password, request.kdfSalt, request.kdfParams),
+                };
+
+            case 'completeUnlock':
+                keyring.completeUnlock(request.wrappedUserKey, request.userKeyAad);
+
+                return {};
+
+            case 'register':
+                return keyring.register(request);
+
+            case 'beginRecovery':
+                return { authKey: keyring.beginRecovery(request.recoveryCode, request.recoverySalt) };
+
+            case 'unlockWithRecovery':
+                keyring.unlockWithRecovery(
+                    request.recoveryCode,
+                    request.recoverySalt,
+                    request.wrappedUserKey,
+                    request.userKeyAad,
+                );
+
+                return {};
+
+            case 'rewrapForPassword':
+                return keyring.rewrapForPassword(
+                    request.password,
+                    request.kdfSalt,
+                    request.kdfParams,
+                    request.userKeyAad,
+                );
+
+            case 'issueRecoveryKit':
+                return keyring.issueRecoveryKit(request.userKeyAad);
+
             case 'lock':
                 keyring.lock();
 

@@ -101,11 +101,24 @@ export function unwrapKey(wrappingKey: Uint8Array, wrapped: Uint8Array, aad: Aad
     return key;
 }
 
-export interface RecoveryCode {
+export interface RecoveryKeys {
+    /** Wraps a second copy of the User Key. Never leaves the device. */
+    kek: Uint8Array;
+    /**
+     * Proves possession of the recovery code to the server, which stores only a
+     * hash of it.
+     *
+     * The same split as the password (D4), and for the same reason: the server
+     * must be able to verify a recovery attempt without learning anything that
+     * unwraps the User Key. Sending the code itself would hand a server that
+     * already holds the wrapped key everything it needs.
+     */
+    authKey: Uint8Array;
+}
+
+export interface RecoveryCode extends RecoveryKeys {
     /** Grouped for printing: XXXX-XXXX-XXXX-… */
     formatted: string;
-    /** The KEK it derives, which wraps a second copy of the User Key. */
-    kek: Uint8Array;
     salt: Uint8Array;
 }
 
@@ -122,15 +135,20 @@ export function generateRecoveryCode(): RecoveryCode {
     const salt = randomBytes(16);
     const formatted = group(encodeBase32(code));
 
-    const recovery = { formatted, salt, kek: deriveRecoveryKek(formatted, salt) };
-
     zeroise(code);
 
-    return recovery;
+    return { formatted, salt, ...deriveRecoveryKeys(formatted, salt) };
 }
 
-/** Re-derives the recovery KEK from a code the user has typed back in. */
-export function deriveRecoveryKek(formattedCode: string, salt: Uint8Array): Uint8Array {
+/**
+ * Re-derives both recovery keys from a code the user has typed back in.
+ *
+ * HKDF rather than Argon2id: the input is already 128 bits of uniform
+ * randomness, so a slow KDF would cost the user time and buy nothing. The
+ * password gets Argon2id because it is low entropy. That distinction is the
+ * point, not an inconsistency.
+ */
+export function deriveRecoveryKeys(formattedCode: string, salt: Uint8Array): RecoveryKeys {
     const code = decodeBase32(formattedCode);
 
     if (code.length !== RECOVERY_CODE_BYTES) {
@@ -139,11 +157,14 @@ export function deriveRecoveryKek(formattedCode: string, salt: Uint8Array): Uint
         );
     }
 
-    const kek = deriveKey(code, salt, 'vault:recovery:v1');
+    const keys = {
+        kek: deriveKey(code, salt, 'vault:recovery:enc:v1'),
+        authKey: deriveKey(code, salt, 'vault:recovery:auth:v1'),
+    };
 
     zeroise(code);
 
-    return kek;
+    return keys;
 }
 
 export interface KeyPair {

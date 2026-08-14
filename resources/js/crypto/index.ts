@@ -41,7 +41,7 @@ export {
 
 export {
     deriveFromPassword,
-    deriveRecoveryKek,
+    deriveRecoveryKeys,
     generateKdfSalt,
     generateKey,
     generateRecoveryCode,

@@ -189,7 +189,25 @@ authenticated and locked; you can never be unlocked without being authenticated.
 
 ### Recovery
 
-Same as login, but step 2 uses `HKDF(recoveryCode, recoverySalt)` to unwrap the User Key.
+**The recovery code is split, exactly as the password is.** Two keys are derived from it with
+HKDF under different `info` strings:
+
+- `RecoveryKEK = HKDF(code, salt, info="vault:recovery:enc:v1")` — unwraps the User Key, stays in
+  the browser.
+- `RecoveryAuthKey = HKDF(code, salt, info="vault:recovery:auth:v1")` — sent to the server, which
+  stores only a slow hash of it in `user_key_wraps.verifier_hash`.
+
+This split is not cosmetic symmetry with D4; without it the design has no safe option. Either the
+server hands the recovery wrapping to anyone who names an address — letting an attacker overwrite
+that account's password wrapping and lock the owner out — or it receives the code itself, which
+combined with the wrapping it already holds gives it the User Key outright. Splitting the code
+lets the server *verify* a recovery attempt while still being unable to complete one.
+
+Found while implementing Phase 2; the flow below reflects the corrected design.
+
+Recovery is then two steps, mirroring login: `POST /recover/salt` returns the salt (with a stable
+decoy for unknown addresses), and `POST /recover` proves possession with the auth key and returns
+the wrapping. Step 2 uses `RecoveryKEK` to unwrap the User Key, client-side.
 On success, the user is **required** to set a new password before continuing, which re-wraps the
 User Key under the new KEK. The old recovery code is invalidated and a fresh kit is issued, since
 it has now been typed into a browser and possibly a password manager, a screenshot and a

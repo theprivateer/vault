@@ -13,33 +13,38 @@ use Illuminate\Support\Str;
 class UserFactory extends Factory
 {
     /**
-     * The current password being used by the factory.
+     * A fixed auth key so tests can sign in without deriving one.
+     *
+     * Real accounts never use this: the auth key is Argon2id output from a
+     * password that only ever exists in a browser.
      */
-    protected static ?string $password;
+    public const AUTH_KEY = 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=';
 
     /**
-     * Define the model's default state.
-     *
      * @return array<string, mixed>
      */
     public function definition(): array
     {
         return [
-            'name' => fake()->name(),
+            'uuid' => (string) Str::uuid7(),
             'email' => fake()->unique()->safeEmail(),
-            'email_verified_at' => now(),
-            'password' => static::$password ??= Hash::make('password'),
+            'display_name' => fake()->name(),
+            'handle' => Str::lower(fake()->unique()->userName()),
+            'kdf_salt' => base64_encode(random_bytes(16)),
+            'kdf_algorithm' => 'argon2id',
+            'kdf_params' => ['m' => 8, 't' => 1, 'p' => 1],
+            'auth_key_hash' => Hash::make(self::AUTH_KEY),
+            // Model::shouldBeStrict() makes reading an unloaded attribute throw,
+            // and the session guard reads this on logout.
             'remember_token' => Str::random(10),
         ];
     }
 
-    /**
-     * Indicate that the model's email address should be unverified.
-     */
-    public function unverified(): static
+    public function withTotp(string $secret = 'JBSWY3DPEHPK3PXP'): static
     {
-        return $this->state(fn (array $attributes) => [
-            'email_verified_at' => null,
+        return $this->state(fn (): array => [
+            'totp_secret_ct' => $secret,
+            'totp_confirmed_at' => now(),
         ]);
     }
 }

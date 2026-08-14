@@ -37,7 +37,14 @@ class HandleInertiaRequests extends Middleware
     {
         return [
             ...parent::share($request),
-            //
+            'auth' => [
+                /*
+                 | Only what the interface needs to render. Nothing here is
+                 | secret, and nothing here can decrypt anything — but there is
+                 | no reason to ship more than the shell requires.
+                 */
+                'user' => $request->user()?->only(['uuid', 'display_name', 'handle', 'email']),
+            ],
         ];
     }
 }

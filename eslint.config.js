@@ -28,6 +28,18 @@ export default ts.config(
         files: ['resources/js/**/*.{ts,vue}'],
         rules: {
             /*
+             | TypeScript already resolves every identifier, and no-undef has no
+             | knowledge of DOM lib types — it flags `window`, `crypto` and
+             | `setTimeout` as undefined. typescript-eslint recommends turning it
+             | off for TS sources for exactly this reason.
+             */
+            'no-undef': 'off',
+
+            // Type-based optional props carry `| undefined` rather than a
+            // runtime default, which is what this rule wants to see.
+            'vue/require-default-prop': 'off',
+
+            /*
              | Nothing downstream of a decrypt may reach the console. Disabling
              | this rule inline is allowed, but it should be a conscious act with
              | a comment explaining why the logged value is not sensitive.
