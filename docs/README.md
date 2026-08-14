@@ -40,7 +40,14 @@ opaque to the server; search happens in the browser.
 
 ## Status
 
-**Phase 0 (foundations & guardrails) complete.** Inertia v3 + Vue 3 + TypeScript strict, a
-strict nonce-based CSP enforced from the first render, Larastan at max level, and CI gating every
-check. Next: [Phase 1 — the crypto core](05-implementation-plan.md#phase-1--crypto-core-library),
-which begins by benchmarking Argon2id ([ADR-0003](adr/0003-argon2id-implementation.md)).
+**Phases 0 and 1 complete.**
+
+- **Phase 0** — Inertia v3 + Vue 3 + TypeScript strict, a strict nonce-based CSP enforced from
+  the first render, Larastan at max level, and CI gating every check.
+- **Phase 1** — the crypto core in `resources/js/crypto`: envelope format with mandatory AAD
+  binding, the key hierarchy, sealed boxes, identities, and the crypto Worker. 200 tests at 100%
+  coverage, verified against RFC vectors and cross-checked byte-for-byte against PHP's
+  `ext-sodium`. Argon2id measured at 731 ms, so the CSP stays free of `wasm-unsafe-eval`
+  ([ADR-0003](adr/0003-argon2id-implementation.md)).
+
+Next: [Phase 2 — identity, unlock & recovery](05-implementation-plan.md#phase-2--identity-unlock--recovery).

@@ -58,7 +58,13 @@ export default ts.config(
                 {
                     patterns: [
                         {
-                            group: ['vue', '@inertiajs/*', '@/*', '../*', '!./*'],
+                            /*
+                             | Blocks the framework and the app alias rather than
+                             | relative depth: crypto/worker/ legitimately imports
+                             | its siblings via '../', and anything reaching the
+                             | application would go through '@/'.
+                             */
+                            group: ['vue', 'vue/*', '@inertiajs/*', 'pinia', '@/*'],
                             message:
                                 'The crypto core must not depend on the application or its framework. Keep it standalone and independently testable.',
                         },
@@ -78,9 +84,20 @@ export default ts.config(
     },
 
     {
-        // Build config lives outside the tsconfig project, so type-aware rules
-        // have no program to work from.
-        files: ['*.config.{js,ts}'],
+        // Build config and benchmark scripts live outside the tsconfig project,
+        // so type-aware rules have no program to work from.
+        files: ['*.config.{js,ts}', 'benchmarks/**/*.mjs'],
         extends: [ts.configs.disableTypeChecked],
+        languageOptions: {
+            globals: {
+                console: 'readonly',
+                performance: 'readonly',
+                process: 'readonly',
+            },
+        },
+        rules: {
+            // A benchmark that cannot print its results is not a benchmark.
+            'no-console': 'off',
+        },
     },
 );

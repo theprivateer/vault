@@ -240,6 +240,18 @@ The sealed box is: ephemeral X25519 keypair → `ECDH(eph_sk, recipient_pk)` →
 Stored as `eph_pk ‖ envelope`. Anonymous to the recipient by construction, which is why the
 separate signed grant carries the sender's identity.
 
+**Small-order public keys must be rejected.** Ed25519 verification accepts an all-zero signature
+against an all-zero public key, for any message. Without an explicit check, a malicious server
+could publish a degenerate identity whose self-signature verifies — defeating the exact check
+that exists to detect key substitution. Identity verification therefore rejects all eight points
+of the Ed25519 torsion subgroup (`ED25519_TORSION_SUBGROUP`, which includes the all-zero
+encoding) and the all-zero X25519 key. X25519's own small-order points are refused by
+`getSharedSecret` at the point of use.
+
+Verification of untrusted keys **never throws**: malformed, degenerate and simply-wrong input all
+return `false`, to be rendered as a warning. Signing throws on bad input, because that is our own
+data. Found and fixed during Phase 1; see `identity.ts`.
+
 ### Revocation and rotation
 
 Revocation without rotation is theatre — the removed member's client may have cached the Vault

@@ -10,6 +10,7 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "bench:argon2": "node benchmarks/argon2.mjs",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage"
   },
@@ -17,6 +18,9 @@
     "@eslint/js": "^10.0.1",
     "@inertiajs/vite": "^3.6.1",
     "@inertiajs/vue3": "^3.6.1",
+    "@noble/ciphers": "^2.3.0",
+    "@noble/curves": "^2.3.0",
+    "@noble/hashes": "^2.3.0",
     "@tailwindcss/vite": "^4.0.0",
     "@types/node": "^26.2.0",
     "@vitejs/plugin-vue": "^6.0.8",

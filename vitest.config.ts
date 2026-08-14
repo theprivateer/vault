@@ -14,7 +14,18 @@ export default defineConfig({
             provider: 'v8',
             reporter: ['text', 'html', 'lcov'],
             include: ['resources/js/**/*.ts'],
-            exclude: ['resources/js/**/*.test.ts', 'resources/js/app.ts'],
+            exclude: [
+                'resources/js/**/*.test.ts',
+                'resources/js/app.ts',
+                /*
+                 | The Worker entry point is a single call to installHandler,
+                 | which cannot execute outside a real Worker scope. The handler
+                 | logic it installs is fully tested against a fake scope — the
+                 | code is split this way so that exactly one line is untestable
+                 | rather than the whole Worker.
+                 */
+                'resources/js/crypto/worker/crypto.worker.ts',
+            ],
             /*
              | Total coverage is noise; coverage of the crypto core is not.
              | Phase 1 builds resources/js/crypto and this threshold is what
