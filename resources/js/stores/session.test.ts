@@ -110,7 +110,7 @@ describe('state machine', () => {
 
     it('unlocks with a password and bundle', async () => {
         markAuthenticated();
-        await unlock('correct horse', bundle);
+        await unlock('correct horse', bundle, null);
 
         expect(useSession().state.status).toBe('unlocked');
     });
@@ -119,7 +119,7 @@ describe('state machine', () => {
         const client = { unlock: vi.fn(() => Promise.reject(new Error('bad password'))), terminate: vi.fn() };
         setCryptoClientFactory(() => client as unknown as CryptoClient);
 
-        await expect(unlock('wrong', bundle)).rejects.toThrow('bad password');
+        await expect(unlock('wrong', bundle, null)).rejects.toThrow('bad password');
 
         expect(useSession().state.unlocking).toBe(false);
         expect(useSession().state.status).not.toBe('unlocked');
@@ -128,7 +128,7 @@ describe('state machine', () => {
     it('locking terminates the worker and records why', async () => {
         const { calls } = fakeClient();
         markAuthenticated();
-        await unlock('correct horse', bundle);
+        await unlock('correct horse', bundle, null);
 
         lock('idle');
 
@@ -141,7 +141,7 @@ describe('state machine', () => {
 
     it('signing out returns to anonymous', async () => {
         markAuthenticated();
-        await unlock('correct horse', bundle);
+        await unlock('correct horse', bundle, null);
 
         signOut();
 
@@ -159,7 +159,7 @@ describe('state machine', () => {
 describe('idle locking', () => {
     it('locks after the idle timeout', async () => {
         markAuthenticated();
-        await unlock('correct horse', bundle);
+        await unlock('correct horse', bundle, null);
 
         vi.advanceTimersByTime(IDLE_TIMEOUT_MS - 1);
         expect(useSession().state.status).toBe('unlocked');
@@ -172,7 +172,7 @@ describe('idle locking', () => {
 
     it('activity postpones the timeout', async () => {
         markAuthenticated();
-        await unlock('correct horse', bundle);
+        await unlock('correct horse', bundle, null);
 
         vi.advanceTimersByTime(IDLE_TIMEOUT_MS - 1000);
         touch();
@@ -221,7 +221,7 @@ describe('lock guards', () => {
     it('locks on pagehide', async () => {
         const window = fakeWindow();
         markAuthenticated();
-        await unlock('correct horse', bundle);
+        await unlock('correct horse', bundle, null);
         installLockGuards(window.target);
 
         window.fire('pagehide');
@@ -233,7 +233,7 @@ describe('lock guards', () => {
     it('postpones the timeout on activity', async () => {
         const window = fakeWindow();
         markAuthenticated();
-        await unlock('correct horse', bundle);
+        await unlock('correct horse', bundle, null);
         installLockGuards(window.target);
 
         vi.advanceTimersByTime(IDLE_TIMEOUT_MS - 1000);
@@ -250,7 +250,7 @@ describe('lock guards', () => {
     it('does not lock immediately when the tab is hidden', async () => {
         const window = fakeWindow();
         markAuthenticated();
-        await unlock('correct horse', bundle);
+        await unlock('correct horse', bundle, null);
         installLockGuards(window.target);
 
         window.fireDocument('visibilitychange');

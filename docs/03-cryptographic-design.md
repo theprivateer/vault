@@ -122,6 +122,38 @@ low-value secret and write it over a high-value one, or swap a `viewer`'s wrappe
 `owner`'s, and the client decrypts happily. With it, the tag check fails and the client shows an
 integrity error naming the record. It is three lines of code and it closes a whole attack class.
 
+#### Which subject, and which version
+
+Settled in Phase 3, because "the UUID of the row" is ambiguous the moment one row holds two
+ciphertexts:
+
+| Context | `subject_uuid` | `version` |
+| --- | --- | --- |
+| `vault.payload`, `lockbox.payload`, `secret.payload` | the item's own UUID | `payload_version` |
+| `item.key` | the UUID of the item the key belongs to | `1`, fixed |
+| `vault.membership.key` | the **membership** UUID, not the vault's | `1`, fixed |
+| `user.userkey`, `user.privkey.*` | the user's UUID | `1`, fixed |
+
+Two decisions worth stating outright:
+
+- **A wrapped key binds to the membership row, not the vault.** Binding to the vault would let a
+  server copy one member's sealed Vault Key onto another member's row — which is the substitution
+  named above, unprevented. Binding to the membership makes that a tag failure.
+- **Key wrappings pin `version` at 1 rather than following `payload_version`.** A wrapped key is
+  32 bytes and has no schema to evolve. Tying it to the payload version would change an item key's
+  binding every time an unrelated field was added to the JSON beside it, for no benefit.
+
+#### The client builds the AAD, always
+
+The server sends ciphertext, UUIDs and version numbers. It never sends associated data, and the
+client never accepts any: each AAD is reconstructed in the browser from the record it is holding.
+
+This is not a detail. A server that could name the AAD could hand over one record's ciphertext
+along with instructions to verify it against a different record — which defeats precisely the
+binding this section exists to establish. Deriving the AAD from the record's own identifier means
+relocating a ciphertext requires relocating its identifier too, and that makes it a different
+record rather than a substituted one.
+
 ### Errors are loud
 
 The 2017 code caught `DecryptException` and returned `null`. The rebuild does the inverse:

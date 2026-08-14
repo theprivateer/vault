@@ -95,6 +95,63 @@ class User extends Authenticatable
         return $this->hasMany(TotpBackupCode::class);
     }
 
+    /**
+     * @return HasMany<VaultMembership, $this>
+     */
+    public function vaultMemberships(): HasMany
+    {
+        return $this->hasMany(VaultMembership::class);
+    }
+
+    /**
+     * Vaults this user owns.
+     *
+     * Ownership is an administrative fact — who may delete the vault and who is
+     * prompted to re-key it. Access is a membership, and is asked for
+     * separately, so an owner who somehow has no membership row can no more
+     * read the vault than a stranger.
+     *
+     * @return HasMany<Vault, $this>
+     */
+    public function vaults(): HasMany
+    {
+        return $this->hasMany(Vault::class, 'owner_id');
+    }
+
+    /**
+     * Everything the browser needs to turn a password into a User Key.
+     *
+     * Safe to hand to anyone holding a valid session: without the password, the
+     * wrapped key is inert. It travels with every authenticated page because the
+     * server cannot tell whether the browser is unlocked — that state lives in
+     * the Worker, and a full page reload destroys it.
+     *
+     * Null when no password wrapping exists. Such an account cannot be unlocked
+     * by anyone, including the server, so the interface has to say so rather
+     * than fail while rendering.
+     *
+     * @return array{kdfSalt: string, kdfParams: array<string, int>, wrappedUserKey: string, userKeyAad: array{context: string, subject: string, version: int}}|null
+     */
+    public function unlockBundle(): ?array
+    {
+        $wrap = $this->keyWraps()->where('method', UserKeyWrap::METHOD_PASSWORD)->first();
+
+        if ($wrap === null) {
+            return null;
+        }
+
+        return [
+            'kdfSalt' => $this->kdf_salt,
+            'kdfParams' => $this->kdf_params,
+            'wrappedUserKey' => $wrap->wrapped_user_key->base64,
+            'userKeyAad' => [
+                'context' => 'user.userkey',
+                'subject' => $this->uuid,
+                'version' => 1,
+            ],
+        ];
+    }
+
     public function hasTotpEnabled(): bool
     {
         return $this->totp_confirmed_at !== null;

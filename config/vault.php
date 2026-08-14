@@ -38,4 +38,26 @@ return [
         'kdf_params_per_minute' => (int) env('VAULT_KDF_PARAMS_THROTTLE', 20),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Item Payloads
+    |--------------------------------------------------------------------------
+    |
+    | The schema versions of the encrypted JSON that this build knows how to
+    | write. The server cannot read a payload, but it can refuse to store one
+    | claiming a version nothing here produces — which is what stops a client
+    | writing data that no other client can interpret.
+    |
+    | The size cap is deliberately generous compared with a credential and
+    | deliberately far below the column limit. It bounds what a compromised
+    | session can push into the database, nothing more. Phase 4 pads payloads
+    | to bucket sizes before encryption, which will make the stored lengths
+    | far less informative than the cap suggests.
+    |
+    */
+
+    'payload_versions' => [1],
+
+    'max_payload_bytes' => (int) env('VAULT_MAX_PAYLOAD_BYTES', 65536),
+
 ];

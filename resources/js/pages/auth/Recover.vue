@@ -139,7 +139,7 @@ async function setNewPassword(): Promise<void> {
             v-if="step === 'kit'"
             :code="newRecoveryCode"
             :email="email"
-            @acknowledged="router.visit('/vault')"
+            @acknowledged="router.visit('/vaults')"
         />
 
         <form v-else-if="step === 'password'" class="max-w-sm space-y-6" @submit.prevent="setNewPassword">

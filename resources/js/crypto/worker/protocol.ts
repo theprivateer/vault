@@ -23,6 +23,26 @@ export type KeyHandle = string;
 /** The account key, unwrapped at unlock. */
 export const USER_KEY: KeyHandle = 'user';
 
+/**
+ * The identity private keys, unwrapped from `user_identities` under the User
+ * Key. X25519 opens sealed vault keys; Ed25519 signs grants from Phase 5.
+ */
+export const X25519_KEY: KeyHandle = 'identity:x25519';
+
+export const ED25519_KEY: KeyHandle = 'identity:ed25519';
+
+/**
+ * Handles are derived from UUIDs rather than chosen freely, so two records can
+ * never collide on one and silently share a key.
+ */
+export function vaultKeyHandle(uuid: string): KeyHandle {
+    return `vault:${uuid}`;
+}
+
+export function itemKeyHandle(uuid: string): KeyHandle {
+    return `item:${uuid}`;
+}
+
 export type Request =
     | {
           op: 'unlock';
@@ -62,11 +82,21 @@ export type Request =
     | { op: 'status' }
     | { op: 'seal'; handle: KeyHandle; plaintext: Uint8Array; aad: AadParams }
     | { op: 'open'; handle: KeyHandle; envelope: Uint8Array; aad: AadParams }
-    | { op: 'unwrapInto'; handle: KeyHandle; using: KeyHandle; wrapped: Uint8Array; aad: AadParams };
+    | { op: 'unwrapInto'; handle: KeyHandle; using: KeyHandle; wrapped: Uint8Array; aad: AadParams }
+    /*
+     | The item-key operations. Between them they build and walk the lower half
+     | of the hierarchy — Vault Key → Item Key → payload — without a single key
+     | byte crossing back to the main thread.
+     */
+    | { op: 'generateInto'; handle: KeyHandle }
+    | { op: 'wrapFrom'; handle: KeyHandle; using: KeyHandle; aad: AadParams }
+    | { op: 'sealToPublicKey'; handle: KeyHandle; recipientPublicKey: Uint8Array; aad: AadParams }
+    | { op: 'openSealedInto'; handle: KeyHandle; using: KeyHandle; sealed: Uint8Array; aad: AadParams }
+    | { op: 'forget'; handle: KeyHandle };
 
 export type ResponseFor<R extends Request['op']> = R extends 'status'
     ? { unlocked: boolean; handles: KeyHandle[] }
-    : R extends 'seal' | 'open'
+    : R extends 'seal' | 'open' | 'wrapFrom' | 'sealToPublicKey'
       ? { bytes: Uint8Array }
       : R extends 'beginUnlock'
         ? { authKey: Uint8Array }

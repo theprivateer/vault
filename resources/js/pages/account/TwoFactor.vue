@@ -52,7 +52,8 @@ async function disable(): Promise<void> {
 </script>
 
 <template>
-    <AppLayout>
+    <!-- Enrolment is an authentication concern; it needs no key material. -->
+    <AppLayout :require-unlock="false">
         <Head title="Two-factor authentication" />
 
         <div class="max-w-xl space-y-8">

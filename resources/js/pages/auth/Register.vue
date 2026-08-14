@@ -122,7 +122,7 @@ async function submit(): Promise<void> {
             v-if="step === 'kit'"
             :code="recoveryCode"
             :email="email"
-            @acknowledged="router.visit('/vault')"
+            @acknowledged="router.visit('/vaults')"
         />
 
         <form v-else class="space-y-6" @submit.prevent="submit">

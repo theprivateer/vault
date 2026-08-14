@@ -1,14 +1,25 @@
 <script setup lang="ts">
-import { Link, router, usePage } from '@inertiajs/vue3';
+import { Link, router } from '@inertiajs/vue3';
 import { onBeforeUnmount, onMounted } from 'vue';
 
-import { installLockGuards, lock, signOut, useSession } from '@/stores/session';
+import UnlockPanel from '@/components/UnlockPanel.vue';
+import { useShared } from '@/lib/page';
+import { installLockGuards, lock, markAuthenticated, signOut, useSession } from '@/stores/session';
 
-const page = usePage<{ auth: { user: { display_name: string; handle: string } | null } }>();
+/**
+ * `requireUnlock` gates the page content behind the unlock prompt. Pages that
+ * are genuinely usable while locked — account settings, second-factor
+ * enrolment — opt out. Anything showing vault data must not.
+ */
+const { requireUnlock = true } = defineProps<{ requireUnlock?: boolean }>();
+
+const page = useShared();
 
 const { state, isUnlocked } = useSession();
 
 let detach: (() => void) | null = null;
+
+markAuthenticated();
 
 onMounted(() => {
     detach = installLockGuards();
@@ -26,7 +37,7 @@ function signOutNow(): void {
     <div class="flex min-h-full flex-col">
         <header class="border-b border-line">
             <div class="mx-auto flex max-w-5xl items-center justify-between gap-4 px-6 py-4">
-                <Link href="/vault" class="text-xs tracking-[0.2em] uppercase">vault</Link>
+                <Link href="/vaults" class="text-xs tracking-[0.2em] uppercase">vault</Link>
 
                 <div class="flex items-center gap-4 text-2xs">
                     <span
@@ -39,6 +50,8 @@ function signOutNow(): void {
                     <span v-if="page.props.auth.user" class="text-muted">
                         {{ page.props.auth.user.handle }}
                     </span>
+
+                    <Link href="/account/two-factor" class="text-muted hover:text-ink">account</Link>
 
                     <button
                         v-if="isUnlocked"
@@ -57,7 +70,8 @@ function signOutNow(): void {
         </header>
 
         <main class="mx-auto w-full max-w-5xl flex-1 px-6 py-10">
-            <slot />
+            <UnlockPanel v-if="requireUnlock && !isUnlocked" />
+            <slot v-else />
         </main>
 
         <footer class="border-t border-line">

@@ -40,7 +40,7 @@ opaque to the server; search happens in the browser.
 
 ## Status
 
-**Phases 0 and 1 complete.**
+**Phases 0 to 3 complete.**
 
 - **Phase 0** — Inertia v3 + Vue 3 + TypeScript strict, a strict nonce-based CSP enforced from
   the first render, Larastan at max level, and CI gating every check.
@@ -54,4 +54,9 @@ opaque to the server; search happens in the browser.
   recovery kit, password change, TOTP second factor, and the unlock state machine. Monochrome
   monospace interface with `rounded-*` and `shadow-*` removed at the token level.
 
-Next: [Phase 3 — vaults, lockboxes, secrets](05-implementation-plan.md#phase-3--vaults-lockboxes-secrets).
+- **Phase 3** — vaults, lockboxes and secrets, end to end. Every name, value and note is encrypted
+  in the browser under a per-item key, and `sqlite3 .dump` returns nothing but noise
+  ([06](06-testing-and-ci.md#verified-by-hand-once)). The leak canary, the IDOR suite and the
+  no-server-decryption gate all run on every commit.
+
+Next: [Phase 4 — client state, search & UX](05-implementation-plan.md#phase-4--client-state-search--ux).

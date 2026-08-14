@@ -8,3 +8,6 @@ Before planning or editing, find the row whose globs match the file's path and r
 | resources/js/crypto/** | .ai/rules/crypto.md |
 | docs/** | .ai/rules/docs.md |
 | resources/js/** | .ai/rules/js.md |
+| resources/js/lib/** | .ai/rules/lib.md |
+| app/Policies/** | .ai/rules/policies.md |
+| routes/** | .ai/rules/routes.md |

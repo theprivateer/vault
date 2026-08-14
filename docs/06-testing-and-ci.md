@@ -25,6 +25,40 @@ well-meaning future change — an eager-loaded relation serialised into a log li
 an exception report body, a queued job payload — that quietly reintroduces server-side plaintext.
 Runs on every commit.
 
+**As built** (`tests/Feature/Vault/LeakCanaryTest.php`), with three refinements that came out of
+writing it:
+
+- **Two sentinels, for two different mistakes.** One is sealed inside a real
+  XChaCha20-Poly1305 envelope built with `ext-sodium` — if it ever appears in the clear, something
+  decrypted it. The other is posted in plaintext in fields the API does not use, as a buggy client
+  would send them — if *that* appears, some path is persisting or logging raw request input.
+- **A guard against a vacuous pass.** The test asserts the row was actually written and that its
+  ciphertext *is* in the haystack. A canary that passes because nothing was stored is worse than
+  no canary, because it reads as evidence.
+- **A self-test.** A third case plants a marker in a table, a log file and the cache, then asserts
+  the sweep finds all three. Otherwise a sweep that silently stopped covering something would
+  leave two green tests guarding nothing.
+
+The rejected-request case matters as much as the accepted one: a handler that logged request
+bodies would leak on exactly the path nobody exercises.
+
+#### Verified by hand, once
+
+The exit criterion for Phase 3 was to look at the database directly. Every row for a vault named
+"Production Infrastructure", holding a secret whose value was `hunter2-the-real-one`:
+
+```
+INSERT INTO vaults VALUES(1,'01a0024a-2847-…',1,'AQHQ5WS1D1CVNg7geMG4AlHln6L4k5/Qxx9C5kZN60c9…
+INSERT INTO lockboxes VALUES(1,'01a0024a-2850-…',1,'AQExfPmBs2PDMI23HwdKwnFY/yGoESzXb0BAPEk1…
+INSERT INTO secrets VALUES(1,'01a0024a-2851-…',1,'AQFPkKYiNf23AnhW8KKdDOQnSx7IIgHt0IoqKEhx9a…
+```
+
+Grepping the whole dump for `Production Infrastructure`, `AWS Root Account`, `root password` and
+`hunter2-the-real-one` returns zero occurrences of each. The only plaintext on those rows is the
+identifier, the timestamps, the payload version and the key epoch — all of it named in
+[04](04-data-model.md) with its reason. In 2017 the same query would have returned the vault's
+name in the clear and a value one application key away from it.
+
 ### 2. AAD binding (SR4) — Phase 1
 
 Seal a payload under record A's associated data; attempt to open it as record B; assert

@@ -132,6 +132,15 @@ Replaces the 2017 `user_vault` pivot with its `read_only` boolean.
 | `accepted_at` | timestamp null | recipient confirmed the granter's fingerprint |
 | `revoked_at` | timestamp null | |
 
+`grant_signature` and `grant_payload` are nullable as built in Phase 3, and become required in
+Phase 5 when grants are actually signed. Nullable now so that adding signed grants is a change to
+the write path rather than a migration of a populated table.
+
+**Revocation is enforced on read, immediately.** A membership with `revoked_at` set is not a
+membership: every query filters it out and every policy treats it as absent, before any re-key has
+happened. That part is instant and enforceable; the re-key is neither, and the two are separated
+deliberately (see [03 § Revocation](03-cryptographic-design.md#revocation-and-rotation)).
+
 **Leaks:** the sharing graph — who shares what with whom, and when. Named in
 [02 § Accepted leakage](02-threat-model.md#accepted-leakage). Hiding it needs private information
 retrieval, which is out of scope.
@@ -145,7 +154,7 @@ reads, and cannot be — see [01 § A note on what "read-only" means](01-brief-a
 | --- | --- | --- |
 | `id` / `uuid` | | |
 | `vault_id` | FK cascade | |
-| `payload_ct` | binary | `{name, description, notes}` |
+| `payload_ct` | binary | `{name, description}` |
 | `wrapped_item_key`, `payload_version` | | |
 | `sort_order` | int | plaintext — leaks ordering only, and sorting must work while locked |
 | `timestamps`, `deleted_at` | | |
@@ -266,6 +275,13 @@ system, and worth a comment in the model.
 
 - Vault delete → soft delete, 30-day grace, then a job hard-deletes lockboxes, secrets, versions,
   file rows **and object storage blobs**. Orphaned ciphertext in S3 is the classic miss.
+
+  **A soft delete hides the parent and leaves the children routable.** During the grace period the
+  lockboxes and secrets of a deleted vault are still live rows with valid UUIDs, so an identifier
+  captured before the delete would still resolve. Every policy therefore checks the whole chain
+  above a record for deletion, not just the record itself, and the parent relations are declared
+  `withTrashed()` so that a deleted parent is a state to test rather than a null to trip over.
+  Covered by the IDOR suite.
 - User delete → their memberships go, and vaults they solely own enter the grace period. Vaults
   with other members must be transferred first, and the UI blocks deletion until they are.
   Their `audit_events` rows are retained with `actor_id` nulled — deleting them would break the

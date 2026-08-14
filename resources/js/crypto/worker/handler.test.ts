@@ -1,13 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
 import type { AadParams } from '../aad';
+import { InvalidParameterError } from '../errors';
 import { deriveFromPassword, generateKdfSalt, generateKey, wrapKey } from '../keys';
 import { utf8ToBytes } from '../primitives';
 import type { Handler, WorkerScope } from './handler';
 import { createHandler, installHandler, serialiseError } from './handler';
+import type { RegistrationResult } from './keyring';
 import { Keyring } from './keyring';
 import type { Reply, Request } from './protocol';
-import { USER_KEY } from './protocol';
+import { USER_KEY, X25519_KEY } from './protocol';
 
 const FAST_KDF = { m: 8, t: 1, p: 1 };
 const SUBJECT = '0192f3a1-4b2c-7d3e-8f90-a1b2c3d4e5f6';
@@ -98,6 +100,95 @@ describe('dispatch', () => {
     });
 });
 
+describe('item key operations', () => {
+    /** Registers, then loads the identity private key the way a page does. */
+    function identityHandler(): { handler: Handler; publicKey: Uint8Array } {
+        const handler = createHandler();
+
+        const registration = handler({
+            op: 'register',
+            password: PASSWORD,
+            kdfSalt: generateKdfSalt(),
+            kdfParams: FAST_KDF,
+            uuid: SUBJECT,
+        }) as RegistrationResult;
+
+        handler({
+            op: 'unwrapInto',
+            handle: X25519_KEY,
+            using: USER_KEY,
+            wrapped: registration.x25519PrivateKeyCt,
+            aad: { context: 'user.privkey.x25519', subject: SUBJECT, version: 1 },
+        });
+
+        return { handler, publicKey: registration.x25519PublicKey };
+    }
+
+    it('generates, wraps, seals and unseals through the protocol', () => {
+        const { handler, publicKey } = identityHandler();
+
+        handler({ op: 'generateInto', handle: 'vault' });
+        handler({ op: 'generateInto', handle: 'item' });
+
+        const { bytes: wrappedItemKey } = handler({
+            op: 'wrapFrom',
+            handle: 'item',
+            using: 'vault',
+            aad: vaultKeyAad,
+        }) as { bytes: Uint8Array };
+
+        const { bytes: sealedVaultKey } = handler({
+            op: 'sealToPublicKey',
+            handle: 'vault',
+            recipientPublicKey: publicKey,
+            aad: itemAad,
+        }) as { bytes: Uint8Array };
+
+        const { bytes: payload } = handler({
+            op: 'seal',
+            handle: 'item',
+            plaintext: utf8ToBytes('secret'),
+            aad: itemAad,
+        }) as { bytes: Uint8Array };
+
+        // Drop both derived keys and rebuild them from the stored blobs alone.
+        handler({ op: 'forget', handle: 'vault' });
+        handler({ op: 'forget', handle: 'item' });
+
+        handler({
+            op: 'openSealedInto',
+            handle: 'vault',
+            using: X25519_KEY,
+            sealed: sealedVaultKey,
+            aad: itemAad,
+        });
+        handler({
+            op: 'unwrapInto',
+            handle: 'item',
+            using: 'vault',
+            wrapped: wrappedItemKey,
+            aad: vaultKeyAad,
+        });
+
+        expect(handler({ op: 'open', handle: 'item', envelope: payload, aad: itemAad })).toEqual({
+            bytes: utf8ToBytes('secret'),
+        });
+    });
+
+    it('refuses to seal the User Key to a public key', () => {
+        const { handler, publicKey } = identityHandler();
+
+        expect(() =>
+            handler({
+                op: 'sealToPublicKey',
+                handle: USER_KEY,
+                recipientPublicKey: publicKey,
+                aad: itemAad,
+            }),
+        ).toThrow(InvalidParameterError);
+    });
+});
+
 /*
  | The guarantee the whole Worker exists for. Injected script on the main thread
  | can ask for decryptions; it must not be able to lift the keys themselves.
@@ -121,7 +212,10 @@ describe('key isolation', () => {
                 aad: vaultKeyAad,
             }),
             handler({ op: 'seal', handle: 'vault', plaintext: utf8ToBytes('secret'), aad: itemAad }),
+            handler({ op: 'generateInto', handle: 'item' }),
+            handler({ op: 'wrapFrom', handle: 'item', using: 'vault', aad: vaultKeyAad }),
             handler({ op: 'status' }),
+            handler({ op: 'forget', handle: 'item' }),
             handler({ op: 'lock' }),
         ];
 

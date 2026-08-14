@@ -7,7 +7,7 @@ import { CryptoClient, WORKER_URL, isIntegrityFailure } from './client';
 import type { WorkerScope } from './handler';
 import { installHandler } from './handler';
 import type { Reply, Request } from './protocol';
-import { USER_KEY } from './protocol';
+import { USER_KEY, X25519_KEY, itemKeyHandle, vaultKeyHandle } from './protocol';
 
 const FAST_KDF = { m: 8, t: 1, p: 1 };
 const SUBJECT = '0192f3a1-4b2c-7d3e-8f90-a1b2c3d4e5f6';
@@ -522,5 +522,83 @@ describe('account lifecycle through the client', () => {
 
         expect(serialised).toContain(account.recoveryCode);
         expect(serialised).not.toContain([...account.recoveryAuthKey].join(',') + ',999');
+    });
+});
+
+describe('vault keys through the client', () => {
+    const UUID = '0192f3a1-4b2c-7d3e-8f90-a1b2c3d4e5f6';
+    const VAULT_UUID = '0192f3a1-4b2c-7d3e-8f90-a1b2c3d4e5f7';
+
+    const x25519Aad: AadParams = { context: 'user.privkey.x25519', subject: UUID, version: 1 };
+    const membershipAad: AadParams = { context: 'vault.membership.key', subject: VAULT_UUID, version: 1 };
+    const wrapAad: AadParams = { context: 'item.key', subject: VAULT_UUID, version: 1 };
+    const payloadAad: AadParams = { context: 'vault.payload', subject: VAULT_UUID, version: 1 };
+
+    const VAULT = vaultKeyHandle(VAULT_UUID);
+    const ITEM = itemKeyHandle(VAULT_UUID);
+
+    it('creates a vault and reopens it from the stored blobs alone', async () => {
+        const { client } = clientWithWorker();
+
+        const account = await client.register({
+            password: PASSWORD,
+            kdfSalt: generateKdfSalt(),
+            kdfParams: FAST_KDF,
+            uuid: UUID,
+        });
+
+        await client.unwrapInto({
+            handle: X25519_KEY,
+            using: USER_KEY,
+            wrapped: account.x25519PrivateKeyCt,
+            aad: x25519Aad,
+        });
+
+        await client.generateInto(VAULT);
+        await client.generateInto(ITEM);
+
+        const payloadCt = await client.seal(ITEM, utf8ToBytes('{"name":"Production"}'), payloadAad);
+        const wrappedItemKey = await client.wrapFrom(ITEM, VAULT, wrapAad);
+        const wrappedVaultKey = await client.sealToPublicKey(VAULT, account.x25519PublicKey, membershipAad);
+
+        await client.forget(VAULT);
+        await client.forget(ITEM);
+
+        await client.openSealedInto({
+            handle: VAULT,
+            using: X25519_KEY,
+            sealed: wrappedVaultKey,
+            aad: membershipAad,
+        });
+        await client.unwrapInto({ handle: ITEM, using: VAULT, wrapped: wrappedItemKey, aad: wrapAad });
+
+        expect(await client.open(ITEM, payloadCt, payloadAad)).toEqual(utf8ToBytes('{"name":"Production"}'));
+    });
+
+    it('reports a relocated wrapped item key as an integrity failure', async () => {
+        const { client } = clientWithWorker();
+
+        const account = await client.register({
+            password: PASSWORD,
+            kdfSalt: generateKdfSalt(),
+            kdfParams: FAST_KDF,
+            uuid: UUID,
+        });
+
+        expect(account.x25519PublicKey).toHaveLength(32);
+
+        await client.generateInto(VAULT);
+        await client.generateInto(ITEM);
+
+        const wrapped = await client.wrapFrom(ITEM, VAULT, wrapAad);
+
+        await expect(
+            client.unwrapInto({
+                handle: ITEM,
+                using: VAULT,
+                wrapped,
+                aad: { ...wrapAad, subject: UUID },
+            }),
+        ).rejects.toSatisfy(isIntegrityFailure);
     });
 });

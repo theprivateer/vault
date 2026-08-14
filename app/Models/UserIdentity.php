@@ -62,6 +62,26 @@ class UserIdentity extends Model
     }
 
     /**
+     * The owner's own view: public keys plus their encrypted private halves.
+     *
+     * Shipping the private key ciphertexts to their owner is safe for the same
+     * reason as the wrapped User Key — they are sealed under a key the server
+     * has never held, and are inert without the password. The browser needs
+     * them because opening any vault means opening a sealed box, and that needs
+     * the X25519 private key inside the Worker.
+     *
+     * @return array{x25519PublicKey: string, ed25519PublicKey: string, x25519PrivateKeyCt: string, ed25519PrivateKeyCt: string, selfSignature: string, fingerprint: string}
+     */
+    public function toOwnerBundle(): array
+    {
+        return [
+            ...$this->toPublicBundle(),
+            'x25519PrivateKeyCt' => $this->x25519_private_key_ct->base64,
+            'ed25519PrivateKeyCt' => $this->ed25519_private_key_ct->base64,
+        ];
+    }
+
+    /**
      * @return array<string, string>
      */
     protected function casts(): array

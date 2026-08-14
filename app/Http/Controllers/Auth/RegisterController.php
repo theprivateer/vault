@@ -85,7 +85,7 @@ class RegisterController extends Controller
         auth()->login($user);
         $request->session()->regenerate();
 
-        return response()->json(['redirect' => route('vault')]);
+        return response()->json(['redirect' => route('vaults.index')]);
     }
 
     /**

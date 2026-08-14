@@ -5,7 +5,6 @@ namespace App\Http\Controllers\Auth;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Auth\LoginRequest;
 use App\Models\User;
-use App\Models\UserKeyWrap;
 use App\Support\Totp;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -71,8 +70,8 @@ class LoginController extends Controller
         $user->forceFill(['last_login_at' => now()])->save();
 
         return response()->json([
-            'redirect' => route('vault'),
-            'bundle' => self::unlockBundle($user),
+            'redirect' => route('vaults.index'),
+            'bundle' => $user->unlockBundle(),
         ]);
     }
 
@@ -84,30 +83,6 @@ class LoginController extends Controller
         $request->session()->regenerateToken();
 
         return redirect()->route('login');
-    }
-
-    /**
-     * Everything the client needs to turn a password into a User Key.
-     *
-     * Safe to hand to anyone holding a valid session: without the password, the
-     * wrapped key is inert.
-     *
-     * @return array{kdfSalt: string, kdfParams: array<string, int>, wrappedUserKey: string, userKeyAad: array{context: string, subject: string, version: int}}
-     */
-    public static function unlockBundle(User $user): array
-    {
-        $wrap = $user->keyWraps()->where('method', UserKeyWrap::METHOD_PASSWORD)->firstOrFail();
-
-        return [
-            'kdfSalt' => $user->kdf_salt,
-            'kdfParams' => $user->kdf_params,
-            'wrappedUserKey' => $wrap->wrapped_user_key->base64,
-            'userKeyAad' => [
-                'context' => 'user.userkey',
-                'subject' => $user->uuid,
-                'version' => 1,
-            ],
-        ];
     }
 
     /**

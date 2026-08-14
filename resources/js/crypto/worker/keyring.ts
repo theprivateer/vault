@@ -6,20 +6,34 @@
  */
 import type { AadContext, AadParams } from '../aad';
 import { open, seal } from '../envelope';
-import { KeyUnavailableError } from '../errors';
+import { InvalidParameterError, KeyUnavailableError, MalformedEnvelopeError } from '../errors';
 import { generateIdentity } from '../identity';
 import {
     deriveFromPassword,
     deriveRecoveryKeys,
     generateKey,
     generateRecoveryCode,
+    openSealed,
+    sealTo,
     unwrapKey,
     wrapKey,
 } from '../keys';
 import type { KdfParams } from '../primitives';
-import { zeroise } from '../primitives';
+import { KEY_LENGTH, zeroise } from '../primitives';
 import type { KeyHandle } from './protocol';
-import { USER_KEY } from './protocol';
+import { ED25519_KEY, USER_KEY, X25519_KEY } from './protocol';
+
+/**
+ * Keys that must never be sealed to a public key supplied by a caller.
+ *
+ * `sealToPublicKey` is the one operation that produces something a party other
+ * than this device can open, so it is the one place where injected script could
+ * turn "ask the Worker to do things" into "walk away with the account". Sharing
+ * needs it for Vault Keys; nothing needs it for these three, so they are
+ * refused. It bounds an XSS to the items it explicitly asks for — see adversary
+ * A7 in docs/02-threat-model.md.
+ */
+const UNSEALABLE: readonly KeyHandle[] = [USER_KEY, X25519_KEY, ED25519_KEY];
 
 export interface UnlockRequest {
     password: string;
@@ -255,6 +269,59 @@ export class Keyring {
 
         this.forget(handle);
         this.keys.set(handle, unwrapped);
+    }
+
+    /**
+     * Generates a fresh random key under a handle: a Vault Key or an Item Key.
+     *
+     * It never leaves. The caller receives nothing at all, and reaches the key
+     * only through `seal`, `wrapFrom` and `sealToPublicKey`.
+     */
+    generateInto(handle: KeyHandle): void {
+        this.forget(handle);
+        this.keys.set(handle, generateKey());
+    }
+
+    /**
+     * Wraps one held key under another and returns the ciphertext.
+     *
+     * Both operands are handles, so this cannot be used to wrap a key under
+     * attacker-chosen bytes — the output is only openable by whoever already
+     * holds the wrapping key.
+     */
+    wrapFrom(handle: KeyHandle, using: KeyHandle, aad: AadParams): Uint8Array {
+        return wrapKey(this.require(using), this.require(handle), aad);
+    }
+
+    /** Seals a held key to a recipient's X25519 public key. */
+    sealToPublicKey(handle: KeyHandle, recipientPublicKey: Uint8Array, aad: AadParams): Uint8Array {
+        if (UNSEALABLE.includes(handle)) {
+            throw new InvalidParameterError(
+                `"${handle}" cannot be sealed to another key. Only vault and item keys are shareable.`,
+            );
+        }
+
+        return sealTo(recipientPublicKey, this.require(handle), aad);
+    }
+
+    /**
+     * Opens a sealed box with a held private key and stores the result under a
+     * new handle. This is how a member's Vault Key is recovered from their
+     * membership row.
+     */
+    openSealedInto(handle: KeyHandle, using: KeyHandle, sealed: Uint8Array, aad: AadParams): void {
+        const key = openSealed(this.require(using), sealed, aad);
+
+        if (key.length !== KEY_LENGTH) {
+            zeroise(key);
+
+            throw new MalformedEnvelopeError(
+                `Sealed value is ${key.length} bytes, expected a ${KEY_LENGTH} byte key.`,
+            );
+        }
+
+        this.forget(handle);
+        this.keys.set(handle, key);
     }
 
     seal(handle: KeyHandle, plaintext: Uint8Array, aad: AadParams): Uint8Array {

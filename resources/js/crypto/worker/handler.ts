@@ -76,6 +76,29 @@ export function createHandler(keyring: Keyring = new Keyring()): Handler {
 
                 return {};
 
+            case 'generateInto':
+                keyring.generateInto(request.handle);
+
+                return {};
+
+            case 'wrapFrom':
+                return { bytes: keyring.wrapFrom(request.handle, request.using, request.aad) };
+
+            case 'sealToPublicKey':
+                return {
+                    bytes: keyring.sealToPublicKey(request.handle, request.recipientPublicKey, request.aad),
+                };
+
+            case 'openSealedInto':
+                keyring.openSealedInto(request.handle, request.using, request.sealed, request.aad);
+
+                return {};
+
+            case 'forget':
+                keyring.forget(request.handle);
+
+                return {};
+
             default:
                 // Exhaustiveness: adding a Request variant without handling it
                 // is a compile error, and an unrecognised op at runtime is

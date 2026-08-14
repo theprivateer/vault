@@ -155,6 +155,39 @@ export class CryptoClient {
         await this.send({ op: 'unwrapInto', ...request });
     }
 
+    async generateInto(handle: KeyHandle): Promise<void> {
+        await this.send({ op: 'generateInto', handle });
+    }
+
+    async wrapFrom(handle: KeyHandle, using: KeyHandle, aad: AadParams): Promise<Uint8Array> {
+        const { bytes } = await this.send<{ bytes: Uint8Array }>({ op: 'wrapFrom', handle, using, aad });
+
+        return bytes;
+    }
+
+    async sealToPublicKey(
+        handle: KeyHandle,
+        recipientPublicKey: Uint8Array,
+        aad: AadParams,
+    ): Promise<Uint8Array> {
+        const { bytes } = await this.send<{ bytes: Uint8Array }>({
+            op: 'sealToPublicKey',
+            handle,
+            recipientPublicKey,
+            aad,
+        });
+
+        return bytes;
+    }
+
+    async openSealedInto(request: Omit<Extract<Request, { op: 'openSealedInto' }>, 'op'>): Promise<void> {
+        await this.send({ op: 'openSealedInto', ...request });
+    }
+
+    async forget(handle: KeyHandle): Promise<void> {
+        await this.send({ op: 'forget', handle });
+    }
+
     send<T>(request: Request): Promise<T> {
         const worker = this.ensure();
         const id = this.nextId++;

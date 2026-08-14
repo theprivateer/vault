@@ -19,6 +19,7 @@ import { CryptoClient } from '@/crypto/worker/client';
 import type { AadParams } from '@/crypto/aad';
 import type { KdfParams } from '@/crypto/primitives';
 import { fromBase64 } from '@/lib/bytes';
+import { loadIdentity } from '@/lib/items';
 
 export type SessionStatus = 'anonymous' | 'locked' | 'unlocked';
 
@@ -32,6 +33,16 @@ export interface UnlockBundle {
     kdfParams: KdfParams;
     wrappedUserKey: string;
     userKeyAad: AadParams;
+}
+
+/**
+ * The identity keys, as the server stores them. The private halves are
+ * encrypted under the User Key, so they are only useful once unlocked.
+ */
+export interface IdentityBundle {
+    x25519PublicKey: string;
+    x25519PrivateKeyCt: string;
+    fingerprint: string;
 }
 
 const state = reactive<{
@@ -88,11 +99,25 @@ export function markAuthenticated(): void {
     }
 }
 
-export async function unlock(password: string, bundle: UnlockBundle): Promise<void> {
+/**
+ * Unlocks, and loads the identity private keys in the same step.
+ *
+ * Deliberately one operation rather than two. Every vault key arrives as a
+ * sealed box addressed to the X25519 key, so an "unlocked" state that could not
+ * open one would be a state where nothing readable is readable — a distinction
+ * with no use and plenty of room for a bug.
+ */
+export async function unlock(
+    password: string,
+    bundle: UnlockBundle,
+    identity: IdentityBundle | null,
+): Promise<void> {
     state.unlocking = true;
 
     try {
-        await crypto().unlock({
+        const client = crypto();
+
+        await client.unlock({
             op: 'unlock',
             password,
             kdfSalt: fromBase64(bundle.kdfSalt),
@@ -100,6 +125,10 @@ export async function unlock(password: string, bundle: UnlockBundle): Promise<vo
             wrappedUserKey: fromBase64(bundle.wrappedUserKey),
             userKeyAad: bundle.userKeyAad,
         });
+
+        if (identity) {
+            await loadIdentity(client, bundle.userKeyAad.subject, identity.x25519PrivateKeyCt);
+        }
 
         state.status = 'unlocked';
         state.lockReason = null;

@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Models\User;
 use Illuminate\Http\Request;
 use Inertia\Middleware;
 
@@ -35,6 +36,8 @@ class HandleInertiaRequests extends Middleware
      */
     public function share(Request $request): array
     {
+        $user = $request->user();
+
         return [
             ...parent::share($request),
             'auth' => [
@@ -43,7 +46,26 @@ class HandleInertiaRequests extends Middleware
                  | secret, and nothing here can decrypt anything — but there is
                  | no reason to ship more than the shell requires.
                  */
-                'user' => $request->user()?->only(['uuid', 'display_name', 'handle', 'email']),
+                'user' => $user?->only(['uuid', 'display_name', 'handle', 'email']),
+
+                /*
+                 | The unlock bundle travels with every authenticated page,
+                 | because the server cannot tell whether the browser is
+                 | unlocked — that state lives entirely in the Worker, and a
+                 | full page reload destroys it. Shipping it here means any page
+                 | can offer the unlock prompt without a round trip.
+                 |
+                 | Safe to hand over: without the password it is inert.
+                 */
+                'bundle' => $user instanceof User ? $user->unlockBundle() : null,
+
+                /*
+                 | The user's own identity, private halves included — still
+                 | encrypted under their User Key. The browser cannot open a
+                 | vault without them, since every Vault Key arrives as a sealed
+                 | box addressed to that X25519 key.
+                 */
+                'identity' => $user instanceof User ? $user->identity?->toOwnerBundle() : null,
             ],
         ];
     }
