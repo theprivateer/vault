@@ -35,6 +35,20 @@ export const WORKER_URL = '/build/crypto.worker.js';
 const defaultFactory: WorkerFactory = () => new Worker(WORKER_URL, { type: 'module' });
 
 /**
+ * Said the same way whether the Worker refuses to construct or dies on load,
+ * because from the outside those are the same problem with the same causes.
+ *
+ * The `child-src` note is not padding: WebKit does not implement `worker-src`,
+ * so a policy that names only `worker-src` falls through to `default-src` and
+ * silently blocks every Worker in Safari.
+ */
+export const WORKER_FAILURE_MESSAGE =
+    'The cryptographic worker could not be started, so nothing can be encrypted or decrypted. ' +
+    'It must be served from the same origin as the page and allowed by the Content-Security-Policy ' +
+    '— note that Safari honours child-src rather than worker-src. ' +
+    'If you are developing, run `npm run build:worker`.';
+
+/**
  * Errors whose constructors take a single message, so they can be rebuilt
  * faithfully on this side of the boundary.
  */
@@ -66,6 +80,59 @@ function rebuildError({ name, message }: SerialisedError): CryptoError {
 /** True when a failure means "this data did not verify", however it was rebuilt. */
 export function isIntegrityFailure(error: unknown): boolean {
     return error instanceof Error && error.name === 'IntegrityError';
+}
+
+/**
+ * Rebuilds a value as plain data that `postMessage` can structured-clone.
+ *
+ * **Why this exists.** Requests are assembled in the application layer, where
+ * some of their parts come from framework state — Inertia page props are made
+ * reactive by Vue, which means they are `Proxy` objects. A Proxy has none of
+ * the internal slots the structured clone algorithm needs, so posting one
+ * throws `DataCloneError` and the whole operation fails at the boundary with a
+ * message that says nothing about proxies. Reading each property through the
+ * proxy and rebuilding a plain object is what makes the value cloneable again.
+ *
+ * Doing it here rather than at each call site is deliberate: the crypto core
+ * cannot import Vue (nor should it), and a rule that every caller must remember
+ * to unwrap its props is a rule that will be forgotten. This is also why it is
+ * framework-agnostic — it reads through *any* wrapper rather than knowing about
+ * one.
+ *
+ * Typed arrays pass through untouched. They are the one thing structured clone
+ * already handles natively, this codebase only ever creates them directly, and
+ * copying every payload buffer on every seal would be a real cost for no gain.
+ * A wrapped typed array would therefore not be normalised — so rather than
+ * silently mangling it into an object of numeric keys, anything unrecognised
+ * throws by name.
+ */
+export function toCloneable<T>(value: T): T {
+    if (value === null || typeof value !== 'object') {
+        return value;
+    }
+
+    // Survives proxying: both check internal state the proxy forwards.
+    if (ArrayBuffer.isView(value) || value instanceof ArrayBuffer) {
+        return value;
+    }
+
+    if (Array.isArray(value)) {
+        return value.map((entry: unknown) => toCloneable(entry)) as T;
+    }
+
+    const prototype: unknown = Object.getPrototypeOf(value);
+
+    if (prototype !== Object.prototype && prototype !== null) {
+        throw new InvalidParameterError(
+            `Cannot send a ${(value as object).constructor?.name ?? 'non-plain'} value to the ` +
+                'cryptographic worker. Only plain objects, arrays and typed arrays can cross ' +
+                'the boundary.',
+        );
+    }
+
+    return Object.fromEntries(
+        Object.entries(value as Record<string, unknown>).map(([key, entry]) => [key, toCloneable(entry)]),
+    ) as T;
 }
 
 export class CryptoClient {
@@ -194,7 +261,10 @@ export class CryptoClient {
 
         return new Promise<T>((resolve, reject) => {
             this.pending.set(id, { resolve: resolve as (value: unknown) => void, reject });
-            worker.postMessage({ id, request });
+
+            // Normalised first: postMessage structured-clones its argument, and
+            // a framework's reactive wrapper is not cloneable. See toCloneable.
+            worker.postMessage({ id, request: toCloneable(request) });
         });
     }
 
@@ -206,11 +276,24 @@ export class CryptoClient {
      * never settles.
      */
     terminate(): void {
+        this.discard(new KeyUnavailableError('The vault was locked before this operation completed.'));
+    }
+
+    /**
+     * Tears the Worker down, rejecting everything still in flight with a stated
+     * reason.
+     *
+     * The reason matters. A Worker that failed to start and a vault that was
+     * deliberately locked both leave callers with an unfulfilled promise, and
+     * reporting the second when it was the first sends whoever is debugging in
+     * precisely the wrong direction.
+     */
+    private discard(reason: CryptoError): void {
         this.worker?.terminate();
         this.worker = null;
 
         for (const { reject } of this.pending.values()) {
-            reject(new KeyUnavailableError('The vault was locked before this operation completed.'));
+            reject(reason);
         }
 
         this.pending.clear();
@@ -227,18 +310,19 @@ export class CryptoClient {
             worker = this.factory();
         } catch (cause) {
             /*
-             | Worker scripts must be same-origin with the page. Under `npm run
-             | dev` Vite serves modules from its own port while Laravel serves
-             | the page from another, so the Worker cannot be constructed at
-             | all — which is why the Worker is built to a stable same-origin
-             | path instead of being resolved through the dev server.
+             | Two causes reach here, and both are environmental rather than
+             | cryptographic:
+             |
+             |   - Cross-origin. Worker scripts must be same-origin with the
+             |     page, and under `npm run dev` Vite serves modules from its
+             |     own port while Laravel serves the page from another. Hence
+             |     the Worker being built to a stable same-origin path rather
+             |     than resolved through the dev server.
+             |   - Blocked by the CSP, which in Safari means `child-src` rather
+             |     than `worker-src`. Browsers differ on whether that throws
+             |     here or fires onerror later, so both paths report it.
              */
-            throw new WorkerUnavailableError(
-                'The cryptographic worker could not be started. It must be served from the same ' +
-                    'origin as the page, and permitted by the worker-src policy. ' +
-                    'If you are developing, run `npm run build:worker`.',
-                cause,
-            );
+            throw new WorkerUnavailableError(WORKER_FAILURE_MESSAGE, cause);
         }
 
         worker.onmessage = ({ data }: MessageEvent<Reply>) => {
@@ -258,9 +342,15 @@ export class CryptoClient {
         };
 
         worker.onerror = () => {
-            // A Worker that has crashed holds nothing useful, and every pending
-            // caller needs to know rather than wait forever.
-            this.terminate();
+            /*
+             | A Worker that has crashed holds nothing useful, and every pending
+             | caller needs to know rather than wait forever.
+             |
+             | This is also where a Worker *blocked by the CSP* surfaces in
+             | browsers that refuse it asynchronously rather than throwing from
+             | the constructor, so the message names that case explicitly.
+             */
+            this.discard(new WorkerUnavailableError(WORKER_FAILURE_MESSAGE));
         };
 
         this.worker = worker;

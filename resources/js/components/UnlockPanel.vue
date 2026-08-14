@@ -10,8 +10,8 @@ import { ref } from 'vue';
 
 import NoticePanel from '@/components/NoticePanel.vue';
 import TextField from '@/components/TextField.vue';
-import { CryptoError } from '@/crypto/errors';
 import { isIntegrityFailure } from '@/crypto/worker/client';
+import { describeError } from '@/lib/errors';
 import { useShared } from '@/lib/page';
 import { unlock, useSession } from '@/stores/session';
 
@@ -47,10 +47,7 @@ async function submit(): Promise<void> {
         if (isIntegrityFailure(error)) {
             failure.value = 'That password did not unlock your vault.';
         } else {
-            // Crypto errors carry a message worth reading — an unavailable
-            // Worker says what to do about it. Anything else is generic.
-            failure.value =
-                error instanceof CryptoError ? error.message : 'Something went wrong unlocking your vault.';
+            failure.value = describeError(error, 'Your vault could not be unlocked.');
         }
     }
 }

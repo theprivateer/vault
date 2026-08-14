@@ -35,10 +35,23 @@ class SecurityHeaders
         'base-uri' => "'none'",
         'object-src' => "'none'",
         'manifest-src' => "'self'",
-        // Phase 1 runs all key material inside a Web Worker. Vite emits workers
-        // as real files under the build directory, so 'self' is sufficient and
-        // blob: is deliberately not allowed.
+        /*
+         | All key material lives inside a Web Worker, built to a real file
+         | under the build directory — so 'self' is sufficient and blob: is
+         | deliberately not allowed.
+         |
+         | `child-src` is not redundant. WebKit does not implement `worker-src`,
+         | and an unrecognised directive is ignored rather than honoured: worker
+         | loading then falls back to `child-src`, and failing that to
+         | `default-src`, which is 'none' here. Without this line Safari blocks
+         | the crypto Worker and the application cannot decrypt anything.
+         |
+         | It cost a day to find, because curl and the Node test suite both see
+         | `worker-src` and are satisfied by it. Only a real WebKit browser
+         | exercises the fallback chain.
+         */
         'worker-src' => "'self'",
+        'child-src' => "'self'",
     ];
 
     /**

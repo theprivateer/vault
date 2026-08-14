@@ -36,7 +36,31 @@ it('locks down the directives that make XSS exploitable', function (string $dire
     ['connect-src', "'self'"],
     // Phase 1 holds key material in a Worker; blob: workers stay disallowed.
     ['worker-src', "'self'"],
+    ['child-src', "'self'"],
 ]);
+
+/**
+ * `child-src` is not redundant beside `worker-src`, and removing it breaks
+ * Safari completely.
+ *
+ * WebKit does not implement `worker-src`. An unrecognised directive is ignored,
+ * not honoured, so worker loading falls back to `child-src` and then to
+ * `default-src` — which is `'none'` here. The result is that the crypto Worker
+ * never starts, and since every key lives inside it, the application cannot
+ * decrypt anything at all.
+ *
+ * This is asserted separately from the table above because the reason matters
+ * more than the value: a future tidy-up that deletes the "duplicate" directive
+ * should fail here and read why.
+ */
+it('names a worker source that browsers without worker-src will still honour', function () {
+    $directives = cspDirectives($this->get('/login'));
+
+    expect($directives)->toHaveKey('child-src')
+        ->and($directives['child-src'])->toBe("'self'")
+        // The fallback that would otherwise apply, and would block everything.
+        ->and($directives['default-src'])->toBe("'none'");
+});
 
 it('issues a nonce that matches the one on the rendered script tag', function () {
     $response = $this->get('/login');

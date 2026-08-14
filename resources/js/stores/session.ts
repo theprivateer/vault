@@ -19,6 +19,7 @@ import { CryptoClient } from '@/crypto/worker/client';
 import type { AadParams } from '@/crypto/aad';
 import type { KdfParams } from '@/crypto/primitives';
 import { fromBase64 } from '@/lib/bytes';
+import { describeError } from '@/lib/errors';
 import { loadIdentity } from '@/lib/items';
 
 export type SessionStatus = 'anonymous' | 'locked' | 'unlocked';
@@ -89,6 +90,27 @@ function startIdleTimer(): void {
 export function touch(): void {
     if (state.status === 'unlocked') {
         startIdleTimer();
+    }
+}
+
+/**
+ * Confirms the crypto Worker can actually start, before anything depends on it.
+ *
+ * Worth its own call because the Worker is load-bearing and its failures are
+ * environmental — a cross-origin URL, a Content-Security-Policy that names
+ * `worker-src` but not `child-src`, a missing build. Discovering that at the
+ * moment a user submits their master password is both the worst time and the
+ * least informative, so pages that are about to need it ask first.
+ *
+ * Returns null when the Worker is healthy, or a message to show when it is not.
+ */
+export async function checkCryptoWorker(): Promise<string | null> {
+    try {
+        await crypto().status();
+
+        return null;
+    } catch (cause) {
+        return describeError(cause, 'The cryptographic worker is unavailable.');
     }
 }
 

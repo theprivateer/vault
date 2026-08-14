@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Head, router } from '@inertiajs/vue3';
-import { computed, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 
 import NoticePanel from '@/components/NoticePanel.vue';
 import RecoveryKit from '@/components/RecoveryKit.vue';
@@ -8,10 +8,10 @@ import TextField from '@/components/TextField.vue';
 import type { KdfParams } from '@/crypto/primitives';
 import AuthLayout from '@/layouts/AuthLayout.vue';
 import { toBase64 } from '@/lib/bytes';
-import { CryptoError } from '@/crypto/errors';
+import { describeError } from '@/lib/errors';
 import { HttpError, postJson } from '@/lib/http';
 import { uuid7 } from '@/lib/uuid';
-import { markAuthenticated, useSession } from '@/stores/session';
+import { checkCryptoWorker, markAuthenticated, useSession } from '@/stores/session';
 
 const props = defineProps<{
     token: string;
@@ -34,6 +34,20 @@ const { crypto: cryptoClient } = useSession();
 
 const errors = ref<Record<string, string[]>>({});
 
+/**
+ * Set when the Worker cannot start at all.
+ *
+ * Checked on mount rather than on submit: there is no point letting someone
+ * choose a master password, read the warning about there being no reset, and
+ * commit to it, only to be told afterwards that nothing could have been
+ * encrypted anyway.
+ */
+const unavailable = ref('');
+
+onMounted(async () => {
+    unavailable.value = (await checkCryptoWorker()) ?? '';
+});
+
 const error = (field: string): string | undefined => errors.value[field]?.[0];
 
 const passwordsMatch = computed(
@@ -53,17 +67,32 @@ async function submit(): Promise<void> {
     failure.value = '';
     step.value = 'deriving';
 
-    try {
-        const uuid = uuid7();
-        const kdfSalt = crypto.getRandomValues(new Uint8Array(16));
+    const uuid = uuid7();
+    const kdfSalt = crypto.getRandomValues(new Uint8Array(16));
 
-        const account = await cryptoClient().register({
+    /*
+     | Two phases, reported separately. They fail for entirely different reasons
+     | — a blocked Worker versus a rejected request — and a single catch around
+     | both produced a message that named the wrong one for as long as it
+     | existed.
+     */
+    let account;
+
+    try {
+        account = await cryptoClient().register({
             password: password.value,
             kdfSalt,
             kdfParams: props.kdfParams,
             uuid,
         });
+    } catch (cause) {
+        failure.value = describeError(cause, 'Your keys could not be generated.');
+        step.value = 'details';
 
+        return;
+    }
+
+    try {
         await postJson(`/register/${props.token}`, {
             uuid,
             display_name: displayName.value,
@@ -93,12 +122,8 @@ async function submit(): Promise<void> {
         if (cause instanceof HttpError) {
             errors.value = cause.errors;
             failure.value = cause.status === 422 ? '' : cause.message;
-        } else if (cause instanceof CryptoError) {
-            // Say what actually went wrong. A generic message here hides
-            // environment problems that look identical to real failures.
-            failure.value = cause.message;
         } else {
-            failure.value = 'Something went wrong generating your keys. Please try again.';
+            failure.value = describeError(cause, 'Your account could not be created.');
         }
 
         step.value = 'details';
@@ -126,6 +151,10 @@ async function submit(): Promise<void> {
         />
 
         <form v-else class="space-y-6" @submit.prevent="submit">
+            <NoticePanel v-if="unavailable" tone="accent" heading="encryption unavailable">
+                {{ unavailable }}
+            </NoticePanel>
+
             <div>
                 <p class="label">invited address</p>
                 <p class="text-sm">{{ email }}</p>
@@ -172,7 +201,11 @@ async function submit(): Promise<void> {
                 be given a recovery kit on the next screen — that is the only way back in.
             </NoticePanel>
 
-            <button type="submit" class="btn btn-primary" :disabled="!ready || step === 'deriving'">
+            <button
+                type="submit"
+                class="btn btn-primary"
+                :disabled="!ready || step === 'deriving' || unavailable !== ''"
+            >
                 {{ step === 'deriving' ? 'generating keys…' : 'create account' }}
             </button>
 

@@ -9,6 +9,7 @@ import type { AadParams } from '@/crypto/aad';
 import type { KdfParams } from '@/crypto/primitives';
 import AuthLayout from '@/layouts/AuthLayout.vue';
 import { fromBase64, toBase64 } from '@/lib/bytes';
+import { describeError } from '@/lib/errors';
 import { HttpError, postJson } from '@/lib/http';
 import { markAuthenticated, useSession } from '@/stores/session';
 
@@ -73,7 +74,7 @@ async function useRecoveryCode(): Promise<void> {
         failure.value =
             error instanceof HttpError
                 ? (error.first('recovery_code') ?? error.first('email') ?? error.message)
-                : 'That email and recovery kit combination did not work.';
+                : describeError(error, 'That email and recovery kit combination did not work.');
     } finally {
         busy.value = false;
     }
@@ -116,8 +117,8 @@ async function setNewPassword(): Promise<void> {
 
         newRecoveryCode.value = kit.recoveryCode;
         step.value = 'kit';
-    } catch {
-        failure.value = 'Could not set your new password. Please try again.';
+    } catch (error) {
+        failure.value = describeError(error, 'Could not set your new password.');
     } finally {
         busy.value = false;
     }

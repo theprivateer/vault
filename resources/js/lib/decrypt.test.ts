@@ -41,7 +41,15 @@ class FakeWorker {
     }
 
     postMessage(message: { id: number; request: Request }): void {
-        this.scope.onmessage?.({ data: message });
+        /*
+         | structuredClone, exactly as a real Worker would.
+         |
+         | Without it this fake accepted anything — including values a real
+         | postMessage refuses, such as a framework's reactive proxy. That gap
+         | let a DataCloneError reach the browser with the entire suite green,
+         | so the clone is the point of this method, not an incidental detail.
+         */
+        this.scope.onmessage?.({ data: structuredClone(message) });
     }
 
     terminate(): void {}

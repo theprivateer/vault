@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { AadParams } from '../aad';
 import { deriveFromPassword, generateKdfSalt, generateKey, wrapKey } from '../keys';
 import { constantTimeEqual, utf8ToBytes } from '../primitives';
-import { CryptoClient, WORKER_URL, isIntegrityFailure } from './client';
+import { CryptoClient, WORKER_URL, isIntegrityFailure, toCloneable } from './client';
 import type { WorkerScope } from './handler';
 import { installHandler } from './handler';
 import type { Reply, Request } from './protocol';
@@ -49,7 +49,15 @@ class FakeWorker implements Pick<Worker, 'postMessage' | 'terminate' | 'onmessag
             throw new Error('posted to a terminated worker');
         }
 
-        this.scope.onmessage?.({ data: message });
+        /*
+         | structuredClone, exactly as a real Worker would.
+         |
+         | Without it this fake accepted anything — including values a real
+         | postMessage refuses, such as a framework's reactive proxy. That gap
+         | let a DataCloneError reach the browser with the entire suite green,
+         | so the clone is the point of this method, not an incidental detail.
+         */
+        this.scope.onmessage?.({ data: structuredClone(message) });
     }
 
     terminate(): void {
@@ -265,14 +273,33 @@ describe('error handling across the boundary', () => {
         await expect(pending).rejects.toThrow(/locked before this operation completed/);
     });
 
-    it('tears down and rejects pending work when the worker crashes', async () => {
+    /*
+     | A crashed Worker and a locked vault leave callers in the same position
+     | and must not be reported the same way.
+     |
+     | This previously said "the vault was locked", which is what a Worker
+     | blocked by the Content-Security-Policy looked like from the interface —
+     | and it sent debugging in entirely the wrong direction. The message now
+     | names the Worker and the policy directives that govern it.
+     */
+    it('reports a crashed worker as a worker problem, not as a lock', async () => {
         const { client, workers } = clientWithWorker();
 
         const pending = client.status();
         workers[0]!.onerror?.(new Error('worker crashed'));
 
-        await expect(pending).rejects.toThrow(/locked before this operation completed/);
+        await expect(pending).rejects.toThrow(/cryptographic worker could not be started/);
+        await expect(pending).rejects.toThrow(/child-src/);
         expect(client.running).toBe(false);
+    });
+
+    it('still reports a deliberate lock as a lock', async () => {
+        const { client } = clientWithWorker();
+
+        const pending = client.status();
+        client.terminate();
+
+        await expect(pending).rejects.toThrow(/locked before this operation completed/);
     });
 });
 
@@ -600,5 +627,94 @@ describe('vault keys through the client', () => {
                 aad: { ...wrapAad, subject: UUID },
             }),
         ).rejects.toSatisfy(isIntegrityFailure);
+    });
+});
+
+/*
+ | The boundary that broke in the browser while every test here was green.
+ |
+ | Requests are assembled in the application layer, where parts of them come
+ | from framework state — Inertia page props are reactive, which in Vue means
+ | Proxy objects. postMessage structured-clones its argument, a Proxy has none
+ | of the internal slots that algorithm needs, and the whole call fails with a
+ | DataCloneError that mentions nothing about proxies.
+ |
+ | Proxies are used directly here rather than importing Vue: the crypto core
+ | must not depend on the framework, and the failure is a property of the clone
+ | algorithm rather than of Vue.
+ */
+describe('sending values that came from framework state', () => {
+    it('accepts a request whose parts are reactive proxies', async () => {
+        const { client } = clientWithWorker();
+        const details = account();
+
+        const reactive = <T extends object>(value: T): T => new Proxy(value, {});
+
+        // Exactly the shape of the registration and unlock calls: a proxied
+        // params object and a proxied AAD, straight from page props.
+        await client.unlock({
+            ...details.unlockRequest,
+            op: 'unlock',
+            kdfParams: reactive({ ...FAST_KDF }),
+            userKeyAad: reactive({ ...userKeyAad }),
+        });
+
+        expect((await client.status()).unlocked).toBe(true);
+    });
+
+    it('normalises nested proxies without touching typed arrays', () => {
+        const bytes = new Uint8Array([1, 2, 3]);
+
+        const normalised = toCloneable({
+            op: 'seal' as const,
+            handle: 'vault',
+            plaintext: bytes,
+            aad: new Proxy({ ...itemAad }, {}),
+        });
+
+        // Cloneable now, which is the whole point.
+        expect(() => structuredClone(normalised)).not.toThrow();
+
+        // The buffer is passed through rather than copied: structured clone
+        // handles typed arrays natively, and copying every payload would cost
+        // real time on a bulk decrypt for no benefit.
+        expect(normalised.plaintext).toBe(bytes);
+        expect(normalised.aad).toEqual(itemAad);
+    });
+
+    /*
+     | A wrapped typed array would not be normalised, and rebuilding it as a
+     | plain object would silently turn a key into {0: 12, 1: 84, …}. Refusing
+     | by name beats corrupting the data quietly.
+     */
+    it('refuses a value it cannot normalise instead of mangling it', () => {
+        expect(() => toCloneable({ op: 'lock' as const, when: new Date() })).toThrow(
+            /Cannot send a Date value/,
+        );
+    });
+
+    it('leaves primitives, arrays and raw buffers alone', () => {
+        const buffer = new ArrayBuffer(8);
+
+        expect(toCloneable('a string')).toBe('a string');
+        expect(toCloneable(null)).toBeNull();
+        expect(toCloneable([1, [2, 3]])).toEqual([1, [2, 3]]);
+        expect(toCloneable(buffer)).toBe(buffer);
+    });
+
+    it('treats a null-prototype object as plain', () => {
+        const bare = Object.assign(Object.create(null) as Record<string, unknown>, { m: 8 });
+
+        expect(toCloneable({ params: bare })).toEqual({ params: { m: 8 } });
+    });
+
+    /*
+     | An object whose prototype is itself null-prototyped has no `constructor`
+     | to name, so the refusal has to stay readable without one.
+     */
+    it('refuses an unnameable object without failing on the name', () => {
+        const exotic = Object.create(Object.create(null) as object) as object;
+
+        expect(() => toCloneable({ value: exotic })).toThrow(/Cannot send a non-plain value/);
     });
 });
