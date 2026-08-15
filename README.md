@@ -77,8 +77,9 @@ Read in this order:
 
 ## Status
 
-Phases 0–5 of [thirteen](docs/05-implementation-plan.md) are complete: a working zero-knowledge
-vault that can be shared with other people and taken back.
+Phases 0–8 of [thirteen](docs/05-implementation-plan.md) are complete: a working zero-knowledge
+vault that can be shared with other people and taken back, holds encrypted attachments, keeps a
+tamper-evident log of what happened in it, and remembers what its secrets used to say.
 
 - **Phase 0** — Inertia + Vue + TypeScript strict, a nonce-based CSP enforced from the first
   render, static analysis at maximum, CI gating every check.
@@ -95,9 +96,22 @@ vault that can be shared with other people and taken back.
 - **Phase 5** — sharing by signed grant, trust-on-first-use fingerprint pinning with a hard stop
   when a key changes, and revocation that triggers an atomic re-key. The phase where the
   asymmetric layer earns its place.
+- **Phase 6** — encrypted file attachments: chunked AES-256-GCM through WebCrypto, with each
+  chunk's index and its file's chunk count bound into the associated data, so truncation and
+  reordering fail the tag rather than an application check. Resumable uploads, per-vault quotas, and
+  filenames that exist only inside the encrypted manifest.
+- **Phase 7** — a tamper-evident audit log: a BLAKE2b chain over every action, append-only, with the
+  chain head mailed to the operator daily. The two events the server cannot witness — a vault
+  unlocked, a secret revealed — are reported by the browser and signed, so the one thing a
+  compromised server could invent is the one thing it cannot.
+- **Phase 8** — version history: an edit appends rather than overwrites, and the archived payload is
+  a fresh encryption bound to its own identity rather than a copy of the column it replaced — which
+  is what stops a server writing an old password back over the current one. Diffing is client-side,
+  restoring is an ordinary edit and therefore never destructive, and retention plus an outright
+  purge bound how long a rotated credential stays recoverable.
 
-Next is [Phase 6](docs/05-implementation-plan.md#phase-6--encrypted-file-attachments): encrypted
-file attachments, chunked, with truncation and reorder failing closed.
+Next is [Phase 9](docs/05-implementation-plan.md#phase-9--totp-generators--one-time-links): TOTP,
+password generators, and one-time share links.
 
 ## Stack
 

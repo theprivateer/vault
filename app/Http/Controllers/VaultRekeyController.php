@@ -6,7 +6,9 @@ use App\Enums\AuditAction;
 use App\Http\Requests\RekeyVaultRequest;
 use App\Models\Lockbox;
 use App\Models\Secret;
+use App\Models\SecretVersion;
 use App\Models\Vault;
+use App\Models\VaultFile;
 use App\Models\VaultMembership;
 use App\Support\AuditLog;
 use App\Support\Ciphertext;
@@ -156,6 +158,14 @@ class VaultRekeyController extends Controller
      * statement about lockboxes and secrets and does not quietly depend on
      * remembering one extra thing.
      *
+     * **Files and archived versions are in this set** (Phases 6 and 8). Both
+     * hold Item Keys wrapped under the Vault Key exactly as a live secret does,
+     * and both are easy to forget because neither appears on the page the owner
+     * is looking at when they rotate. Leaving either out would produce a
+     * rotation that reported success and quietly made every attachment and
+     * every previous password in the vault unopenable — the same failure as
+     * skipping trashed rows, arriving by a different route.
+     *
      * @return Support<int, ItemKey>
      */
     private function itemKeys(Vault $vault): Support
@@ -166,6 +176,14 @@ class VaultRekeyController extends Controller
 
         $secrets = Secret::withTrashed()
             ->whereIn('lockbox_id', $lockboxes->modelKeys())
+            ->get(['id', 'uuid', 'wrapped_item_key']);
+
+        $files = VaultFile::withTrashed()
+            ->whereIn('lockbox_id', $lockboxes->modelKeys())
+            ->get(['id', 'uuid', 'wrapped_item_key']);
+
+        $versions = SecretVersion::query()
+            ->whereIn('secret_id', $secrets->modelKeys())
             ->get(['id', 'uuid', 'wrapped_item_key']);
 
         return $lockboxes
@@ -180,6 +198,18 @@ class VaultRekeyController extends Controller
                 $secret->wrapped_item_key->base64,
                 'secrets',
                 $secret->id,
+            )))
+            ->concat($files->map(fn (VaultFile $file): ItemKey => new ItemKey(
+                $file->uuid,
+                $file->wrapped_item_key->base64,
+                'files',
+                $file->id,
+            )))
+            ->concat($versions->map(fn (SecretVersion $version): ItemKey => new ItemKey(
+                $version->uuid,
+                $version->wrapped_item_key->base64,
+                'secret_versions',
+                $version->id,
             )))
             ->values();
     }

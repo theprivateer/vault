@@ -34,3 +34,10 @@ Schedule::command('vault:audit-verify')->dailyAt('05:45')->withoutOverlapping();
  | deletes and the grace periods are measured in hours and days.
  */
 Schedule::command('vault:files-prune')->dailyAt('04:00')->withoutOverlapping();
+
+/*
+ | Superseded secret payloads past their vault's retention policy (Phase 8).
+ | Before the file sweep, and before the audit jobs, so that the history it
+ | removes is recorded on the same day it goes rather than the next one.
+ */
+Schedule::command('vault:history-prune')->dailyAt('03:45')->withoutOverlapping();

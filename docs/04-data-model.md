@@ -28,7 +28,7 @@ users ──1:N── user_key_wraps          (password / recovery / [prf] wrapp
   └──1:N── vault_memberships ──N:1── vaults
                                        │
                                        └──1:N── lockboxes
-                                                  ├──1:N── secrets ──1:N── secret_versions ·
+                                                  ├──1:N── secrets ──1:N── secret_versions
                                                   └──1:N── files
 
 audit_events   (hash-chained, standalone)
@@ -36,7 +36,7 @@ audit_chain    (one row: the chain tip)
 share_links    (one-time, standalone) ·
 ```
 
-Tables marked `·` are specified here but **not yet migrated** — they belong to phases 8 and 9. The
+Tables marked `·` are specified here but **not yet migrated** — `share_links` belongs to phase 9. The
 TOTP seed itself lives on `users` rather than in a table of its own; there was no second column
 worth the join.
 
@@ -140,10 +140,19 @@ verified.
 | `payload_version` | smallint | bound into AAD |
 | `key_epoch` | int default 1 | increments on rotation |
 | `rekey_required_at` | timestamp null | set on revocation; drives the owner's re-key prompt |
+| `history_max_versions` | smallint null | retention; null follows `config/vault.php`, zero keeps none |
+| `history_max_age_days` | smallint null | retention; null follows `config/vault.php` |
 | `timestamps`, `deleted_at` | | soft deletes |
 
-**Leaks:** existence, ownership, timestamps, how many vaults a user has. **The name is
-encrypted** — the single biggest change from 2017, where `vaults.name` was plaintext.
+**Leaks:** existence, ownership, timestamps, how many vaults a user has, and how much history it
+keeps. **The name is encrypted** — the single biggest change from 2017, where `vaults.name` was
+plaintext.
+
+The two retention columns are the only settings in the application the server can read, and they
+have to be: the server is the thing that enforces them, and a retention policy only the client
+could read would be a retention policy nothing applies. What they leak is weak — that one vault
+keeps no history and another keeps five years of it — and it is recorded under accepted leakage in
+[02](02-threat-model.md#accepted-leakage) rather than encrypted.
 
 ### `vault_memberships`
 
@@ -244,22 +253,52 @@ foreign keys.
 **The 2017 `paranoid` flag** is dropped as a column and becomes `payload.paranoid` — a client-side
 UI hint (require re-auth to reveal, never auto-copy). It was never a security control.
 
-### `secret_versions` (Phase 8)
+### `secret_versions`
 
 | Column | Type | Notes |
 | --- | --- | --- |
+| `id` / `uuid` | | the uuid is the AAD subject the archived payload is sealed against |
 | `secret_id` | FK cascade | |
 | `version` | int | unique with `secret_id` |
 | `payload_ct`, `wrapped_item_key`, `payload_version` | | each version keeps its own item key |
-| `created_by` | FK | |
-| `created_at` | timestamp | |
+| `created_by` | FK null | who made the edit that superseded it |
+| `timestamps` | | `updated_at` moves only when a re-key re-wraps the item key |
 
 Each version carrying its own Item Key means version history survives Vault Key rotation by
 re-wrapping, exactly like a live item, and no version is ever re-encrypted.
 
+**An archived version is a separate encryption, not a copy of the column it replaced.** The
+browser re-seals the outgoing plaintext under a fresh Item Key bound to the context
+`secret.version.payload` at *this row's own UUID*, and posts it alongside the replacement; the
+server stores what it is given and could not produce it itself.
+
+The cheaper design — have the server copy `secrets.payload_ct` across on update — is the one that
+must not be built. Copied bytes carry the associated data they were sealed with, which binds them
+to `secret.payload` at the secret's UUID: byte-for-byte the binding the live column has. A server
+holding both could then write any archived version back over the live row and every client would
+verify it happily, silently restoring a password that was rotated *because it leaked*. That is the
+attack history creates, and the distinct context and subject are what close it (SR4).
+
+Two consequences, both real and both stated in the interface rather than worked around. An edit
+costs one extra sealed payload on the wire. And a secret whose stored ciphertext no longer verifies
+cannot be edited at all: an edit has to archive what it replaces, and nothing can archive what it
+could not read. Deleting and re-adding is the way past it, and it keeps the unreadable row rather
+than overwriting the evidence.
+
 **Retention:** unbounded history is a liability — a password you rotated *because it leaked* stays
-recoverable forever. Default to keeping the last 20 versions and 180 days, configurable per vault,
-with a "purge history" action. This tension is worth a UI note.
+recoverable forever. The defaults are in `config/vault.php` (20 versions, 180 days) and either can
+be overridden per vault by `vaults.history_max_versions` and `vaults.history_max_age_days`, both
+nullable, where null means "follow the deployment default" and zero versions turns history off.
+
+The count is enforced the moment an edit archives a payload, because that is when the count
+changes and a bound only a nightly job applied would not be a bound. The age is enforced by
+`vault:history-prune`, since nothing about a secret nobody has touched in a year changes until the
+clock does. Shortening a vault's policy prunes what is already stored immediately, because the
+person changing it is usually doing it *because* of what is in there.
+
+Beside the policy there is a purge: `DELETE /secrets/{secret}/history` erases one secret's history
+now, with no grace period, because a grace period on "erase the leaked password" defeats the
+purpose. The audit log records that it happened and how many rows went, never what they held.
 
 ### `files`
 
@@ -412,6 +451,8 @@ system, and worth a comment in the model.
   with other members must be transferred first, and the UI blocks deletion until they are.
   Their `audit_events` rows are retained with `actor_id` nulled — deleting them would break the
   hash chain, which is the point of the chain.
+- Secret delete → soft delete; its versions stay, because a restorable secret with no history
+  would come back missing most of what it was. A hard delete cascades them.
 - Membership revoke → sets `revoked_at` and `vaults.rekey_required_at` in one transaction.
 
 ## Indexes

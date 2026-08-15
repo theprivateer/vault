@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\Lockbox;
+use App\Models\Secret;
 use App\Models\User;
 use App\Models\Vault;
 use Database\Factories\EnvelopeFixtures;
@@ -255,6 +256,72 @@ it('never writes a file\'s name or contents anywhere it controls', function () {
         expect($path)->not->toContain($filename)
             ->and(pathinfo($path, PATHINFO_EXTENSION))->toBe('');
     }
+});
+
+/*
+ | The same sweep over version history, which is where an old password lives
+ | longest.
+ |
+ | A superseded payload is the one piece of user content that outlives the thing
+ | it belonged to, so a leak here is a leak with a long tail: it survives the
+ | edit that was supposed to replace it. The archive arrives as its own sealed
+ | envelope and the plaintext rides along beside it in fields the server does not
+ | use, exactly as a careless client would send them.
+ */
+it('never writes a superseded payload’s plaintext anywhere it controls', function () {
+    $encrypted = canarySentinel('OLDVALUE');
+    $plaintext = canarySentinel('OLDPLAIN');
+
+    $user = User::factory()->create(['handle' => 'history-canary']);
+    $vault = Vault::factory()->ownedBy($user)->create();
+    $lockbox = Lockbox::factory()->for($vault)->create();
+    $secret = Secret::factory()->for($lockbox)->create();
+
+    $archiveCt = canaryEnvelope(json_encode([
+        'type' => 'password',
+        'key' => 'production database',
+        'value' => $encrypted,
+    ]) ?: '');
+
+    $this->actingAs($user)
+        ->patch("/secrets/{$secret->uuid}", [
+            'payload_ct' => EnvelopeFixtures::envelope(96),
+            'wrapped_item_key' => EnvelopeFixtures::envelope(48),
+            'payload_version' => 2,
+            'version_uuid' => (string) Str::uuid7(),
+            'version_payload_ct' => $archiveCt,
+            'version_wrapped_item_key' => EnvelopeFixtures::envelope(48),
+            'version_payload_version' => 2,
+            'expected_version' => $secret->current_version,
+            /*
+             | The shapes a "make the history readable" change would reach for.
+             | `restored_from` is not among them: it is declared as an integer,
+             | so a string there fails validation and would make this case
+             | vacuous rather than testing anything.
+             */
+            'previous_value' => $plaintext,
+            'summary' => $plaintext,
+            'change_note' => $plaintext,
+        ])
+        ->assertRedirect();
+
+    $haystack = canaryHaystack();
+
+    // Not vacuous: the archive really was written, and is what is being swept.
+    expect($secret->versions()->count())->toBe(1)
+        ->and(implode('', $haystack))->toContain($archiveCt);
+
+    assertCanaryAbsent(
+        $haystack,
+        $encrypted,
+        'The server opened an archived payload, which it has no key to do'
+    );
+
+    assertCanaryAbsent(
+        $haystack,
+        $plaintext,
+        'An edit persisted or logged raw request input alongside the archive'
+    );
 });
 
 it('leaks nothing through a request that fails validation', function () {

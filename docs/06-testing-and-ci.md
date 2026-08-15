@@ -168,6 +168,25 @@ The metadata linter lives here too, in two forms — a structural assertion that
 an allow-listed shape, and a canary that posts a sentinel through the real endpoints in every field
 a careless client might use and asserts it reaches no audit row.
 
+### 3d. The version that could pass for the present — Phase 8
+
+Version history creates one attack that nothing before it could: an archived payload written back
+over the live row, silently restoring a credential that was rotated *because it leaked*. It works
+if and only if the two ciphertexts share a binding, which is exactly what a server-side copy of
+`secrets.payload_ct` would produce.
+
+So the archive is a separate encryption under `secret.version.payload` at the version row's own
+UUID, and `resources/js/lib/history.test.ts` runs the substitution in both directions — an archive
+offered as the live payload, and an archive offered under a different version's identity — and
+expects a tag failure each time. Neither is caught by a check anybody wrote; both are caught by the
+AEAD, which is the same shape of answer as the chunk-count binding above.
+
+The server-side half is in `tests/Feature/Vault/HistoryTest.php`, and the case worth naming is the
+one that asserts a *losing* concurrent edit leaves no archive behind. Without the archive inside the
+transaction that guards the update, the loser's browser would have contributed a version to a
+history whose corresponding edit never happened — a history that is honest about edits that
+succeeded is most of what makes it worth reading.
+
 ### 4. Key material storage (SR7) — outstanding, Phase 11
 
 After unlock, assert `localStorage`, `sessionStorage`, IndexedDB and all cookies are free of key

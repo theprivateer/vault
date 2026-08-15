@@ -12,6 +12,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Config;
 
 /**
  * A vault: the unit of sharing, and the root of one key hierarchy.
@@ -27,6 +28,8 @@ use Illuminate\Support\Carbon;
  * @property int $payload_version
  * @property int $key_epoch
  * @property ?Carbon $rekey_required_at
+ * @property ?int $history_max_versions
+ * @property ?int $history_max_age_days
  */
 class Vault extends Model
 {
@@ -42,6 +45,8 @@ class Vault extends Model
         'wrapped_item_key',
         'payload_version',
         'key_epoch',
+        'history_max_versions',
+        'history_max_age_days',
     ];
 
     /** UUIDs in URLs; the auto-increment key stays internal. */
@@ -95,6 +100,24 @@ class Vault extends Model
     }
 
     /**
+     * How many superseded payloads a secret in this vault keeps.
+     *
+     * Null on the column means "whatever the deployment's default is", so
+     * raising the default lifts every vault that never expressed an opinion.
+     * Zero is a real answer and not an absent one — it is how a vault whose
+     * contents get rotated *because* they leak turns history off.
+     */
+    public function historyMaxVersions(): int
+    {
+        return $this->history_max_versions ?? Config::integer('vault.history.max_versions');
+    }
+
+    public function historyMaxAgeDays(): int
+    {
+        return $this->history_max_age_days ?? Config::integer('vault.history.max_age_days');
+    }
+
+    /**
      * What the browser needs in order to open this vault.
      *
      * Note what is *not* here: any associated data. The client builds its own
@@ -102,7 +125,7 @@ class Vault extends Model
      * hand over a ciphertext along with instructions to verify it against the
      * wrong record — which is precisely the binding AAD exists to provide.
      *
-     * @return array{uuid: string, payloadCt: string, wrappedItemKey: string, payloadVersion: int, keyEpoch: int, updatedAt: ?string, membership: array{uuid: string, role: string, wrappedVaultKey: string, keyEpoch: int}}
+     * @return array{uuid: string, payloadCt: string, wrappedItemKey: string, payloadVersion: int, keyEpoch: int, updatedAt: ?string, history: array{maxVersions: int, maxAgeDays: int, isDefault: bool}, membership: array{uuid: string, role: string, wrappedVaultKey: string, keyEpoch: int}}
      */
     public function toClientArray(VaultMembership $membership): array
     {
@@ -113,6 +136,18 @@ class Vault extends Model
             'payloadVersion' => $this->payload_version,
             'keyEpoch' => $this->key_epoch,
             'updatedAt' => $this->updated_at?->toIso8601String(),
+            /*
+             | The effective policy, not the raw columns: a page showing "null"
+             | where a number is enforced would be describing a setting rather
+             | than the behaviour. `isDefault` is what lets the interface say
+             | whether this vault has an opinion of its own.
+             */
+            'history' => [
+                'maxVersions' => $this->historyMaxVersions(),
+                'maxAgeDays' => $this->historyMaxAgeDays(),
+                'isDefault' => $this->history_max_versions === null
+                    && $this->history_max_age_days === null,
+            ],
             'membership' => [
                 'uuid' => $membership->uuid,
                 'role' => $membership->role->value,

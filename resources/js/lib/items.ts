@@ -87,6 +87,17 @@ export interface EncryptedItem {
 export interface VaultRecord extends EncryptedItem {
     keyEpoch: number;
     updatedAt: string | null;
+    /**
+     * The effective retention policy, not the raw columns: a page showing
+     * "null" where a number is enforced would be describing a setting rather
+     * than the behaviour. `isDefault` is what lets the interface say whether
+     * this vault has an opinion of its own.
+     */
+    history: {
+        maxVersions: number;
+        maxAgeDays: number;
+        isDefault: boolean;
+    };
     membership: {
         uuid: string;
         role: 'owner' | 'editor' | 'viewer';
@@ -112,6 +123,12 @@ export interface SecretRecord extends EncryptedItem {
     version: number;
     sortOrder: number;
     linkedLockboxUuid: string | null;
+    /**
+     * How many superseded payloads this secret has. A count, so a row can offer
+     * a history link only where there is one — the versions themselves cost a
+     * decrypt each and are fetched by the page that shows them.
+     */
+    historyCount: number;
     updatedAt: string | null;
 }
 

@@ -3,9 +3,11 @@
 use App\Enums\VaultRole;
 use App\Models\Lockbox;
 use App\Models\Secret;
+use App\Models\SecretVersion;
 use App\Models\User;
 use App\Models\UserIdentity;
 use App\Models\Vault;
+use App\Models\VaultFile;
 use App\Models\VaultMembership;
 use Database\Factories\EnvelopeFixtures;
 use Illuminate\Support\Facades\DB;
@@ -230,6 +232,86 @@ describe('a complete re-key', function () {
         $restored = Secret::withTrashed()->whereKey($secret->getKey())->sole();
 
         expect($restored->wrapped_item_key->base64)->not->toBe($before);
+    });
+});
+
+/**
+ * The two item kinds that do not appear on the page an owner is looking at when
+ * they rotate.
+ *
+ * A file attachment and an archived version each hold an Item Key wrapped under
+ * the Vault Key, exactly as a live secret does. Neither is visible from the
+ * vault view, which is precisely why both are easy to leave out of the rotation
+ * set — and a rotation that left either out would report success and quietly
+ * make every attachment and every previous password in the vault unopenable.
+ * The failure mode is identical to skipping trashed rows, arriving by a
+ * different route, so it gets the same treatment: the server refuses an
+ * incomplete set rather than trusting the client to have found everything.
+ */
+describe('the items nobody remembers', function () {
+    it('refuses a re-key that leaves out an attachment or an archived version', function () {
+        $fixture = rekeyFixture();
+        $secret = Secret::query()->firstOrFail();
+
+        SecretVersion::factory()->for($secret)->create();
+        VaultFile::factory()->for($secret->lockbox)->create();
+
+        $this->actingAs($fixture['owner'])
+            ->post("/vaults/{$fixture['vault']->uuid}/rekey", rekeyPayload($fixture))
+            ->assertSessionHasErrors('items');
+
+        expect($fixture['vault']->refresh()->key_epoch)->toBe(1);
+    });
+
+    it('re-wraps them when they are included', function () {
+        $fixture = rekeyFixture();
+        $secret = Secret::query()->firstOrFail();
+
+        $version = SecretVersion::factory()->for($secret)->create();
+        $file = VaultFile::factory()->for($secret->lockbox)->create();
+
+        $payload = rekeyPayload($fixture);
+        $payload['items'] = [
+            ...itemsOf($payload),
+            ['uuid' => $version->uuid, 'wrapped_item_key' => EnvelopeFixtures::envelope(48)],
+            ['uuid' => $file->uuid, 'wrapped_item_key' => EnvelopeFixtures::envelope(48)],
+        ];
+
+        $before = [$version->wrapped_item_key->base64, $file->wrapped_item_key->base64];
+
+        $this->actingAs($fixture['owner'])
+            ->post("/vaults/{$fixture['vault']->uuid}/rekey", $payload)
+            ->assertRedirect();
+
+        expect($version->refresh()->wrapped_item_key->base64)->not->toBe($before[0])
+            ->and($file->refresh()->wrapped_item_key->base64)->not->toBe($before[1]);
+    });
+
+    /*
+     | An archived version stays readable after the rotation that re-wrapped it,
+     | which is the exit criterion for this phase stated as a property of the
+     | stored row: its payload was never touched, only the 32 bytes that unlock
+     | it. If the payload had moved, the version would be unopenable and nothing
+     | would have said so.
+     */
+    it('leaves an archived payload byte-for-byte unchanged', function () {
+        $fixture = rekeyFixture();
+        $secret = Secret::query()->firstOrFail();
+        $version = SecretVersion::factory()->for($secret)->create();
+
+        $payload = rekeyPayload($fixture);
+        $payload['items'] = [
+            ...itemsOf($payload),
+            ['uuid' => $version->uuid, 'wrapped_item_key' => EnvelopeFixtures::envelope(48)],
+        ];
+
+        $before = $version->payload_ct->base64;
+
+        $this->actingAs($fixture['owner'])
+            ->post("/vaults/{$fixture['vault']->uuid}/rekey", $payload)
+            ->assertRedirect();
+
+        expect($version->refresh()->payload_ct->base64)->toBe($before);
     });
 });
 

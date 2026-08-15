@@ -10,6 +10,7 @@ app, so it avoids euphemism.
 | --- | --- | --- |
 | Secret payloads (credentials, notes, TOTP seeds) | Ciphertext at rest; plaintext in browser memory while unlocked | Total. This is the product. |
 | File contents | Ciphertext in object storage; plaintext transiently in browser | Total for that file |
+| Superseded secret payloads | Ciphertext at rest, each under its own Item Key | Total for the values they held — including one rotated *because* it leaked |
 | Vault Keys, Item Keys | Wrapped at rest; plaintext in browser memory while unlocked | Disclosure of everything they protect |
 | User Key, KEK, master password | Derived in browser; never at rest, never transmitted | Total compromise of that account, all vaults |
 | Recovery code | Shown once; user's responsibility thereafter | Equivalent to the password |
@@ -107,6 +108,14 @@ The server necessarily learns:
   storing and transferring an arbitrary amount of nothing, and the cost is real where a payload's
   is not. A file's *name*, type and hash are all inside its encrypted manifest, so what leaks is
   how big something is, never what it is.
+- **History** — how many superseded payloads each secret has, when each was archived, and who made
+  the edit. A version's contents are sealed under their own Item Key like anything else, so what
+  leaks is that a value changed on a given day, never what it changed from. A vault's retention
+  policy is plaintext too (`vaults.history_max_versions`, `history_max_age_days`), because the
+  server is the thing that enforces it — a policy only the client could read would be a policy
+  nothing applies. Retention is also the one control here that reduces what a *future* database
+  theft yields: nobody who could read the versions is stopped by deleting them, but bytes that no
+  longer exist cannot be stolen next year.
 - **Membership** — who shares a vault with whom, with what role, and when access was granted or
   revoked. This is social-graph information and it is not hidden. Two parts of it are visible
   because they have to be: `grant_payload` is plaintext, since the recipient must read the bytes
@@ -151,7 +160,7 @@ evidence.
 | SR1 | No plaintext secret material is ever written to the database, logs, cache, queue or object storage | `tests/Feature/Vault/LeakCanaryTest.php` — two sentinels, a vacuous-pass guard and a self-test |
 | SR2 | No key capable of decrypting user content exists on the server, in any form, at any time | `tests/Feature/NoServerDecryptionTest.php`, run again as its own CI job |
 | SR3 | Tampering with any stored ciphertext produces a visible, specific error — never silent corruption or a null | `crypto/envelope.test.ts` — every single-bit mutation of a short envelope throws |
-| SR4 | A ciphertext cannot be moved between records or fields without detection | `crypto/aad.test.ts`, `crypto/keys.test.ts` |
+| SR4 | A ciphertext cannot be moved between records or fields without detection | `crypto/aad.test.ts`, `crypto/keys.test.ts`, and `lib/history.test.ts` for the case history creates — an archived version offered as the live payload |
 | SR5 | Every request is authorised against vault membership and role, independently of client claims | `tests/Feature/Vault/AuthorisationTest.php` (IDOR) and `RoleMatrixTest.php` (role × action) |
 | SR6 | Auth endpoints are rate limited per-IP and per-account, and do not reveal whether an account exists | `tests/Feature/Auth/LoginTest.php`, `RecoveryTest.php` — including the pre-auth salt endpoints |
 | SR7 | Key material never reaches `localStorage`, `sessionStorage`, IndexedDB or a cookie | **Not yet automated.** Holds by construction — nothing in `resources/js` calls any of those APIs — but construction is not a test. Needs the Phase 11 E2E suite |

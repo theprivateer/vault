@@ -444,6 +444,32 @@ anchor; the command fails loudly rather than pretending otherwise.
 Edit, view history, diff, restore. Retention prunes correctly. A re-key after history exists
 re-wraps version keys too, and old versions still open afterwards.
 
+### Carried forward from Phase 8
+
+All five tasks are built and every exit criterion has a passing test —
+`tests/Feature/Vault/HistoryTest.php` for appending, restoring, purging, retention and the sweep,
+`tests/Feature/Vault/RekeyTest.php` for rotation covering version keys with payloads untouched, and
+`resources/js/lib/history.test.ts` and `diff.test.ts` for the client half.
+
+**One departure from the task list, and it is the reason the phase took the shape it did.** Task 1
+said "writes append rather than overwrite, each version with its own Item Key", which reads as
+though the server could copy the outgoing payload into the history table. It cannot, and it must
+not: a copy carries associated data binding it to the live column, so any archived version could be
+written back over the current row and would verify. The browser therefore re-seals the outgoing
+plaintext under `secret.version.payload` at the version row's own UUID and posts it with the edit,
+which is why `UpdateSecretRequest` requires four fields the old one did not.
+
+**A Phase 6 bug fell out of task 5.** `VaultRekeyController::itemKeys()` covered lockboxes and
+secrets only, so file attachments were never in the rotation set: a re-key would have reported
+success and left every attachment in the vault permanently unopenable, its Item Key still wrapped
+under a Vault Key the client had just discarded. Files and versions are both in the set now, and
+`RekeyTest` refuses an incomplete submission that omits either.
+
+**Outstanding:** nothing from this phase's own list. The interaction worth watching is that a vault
+with deep history and many secrets makes a re-key a much larger submission — 20 versions per secret
+is 20× the wrapped keys — and the scale ceiling measured in
+[06](06-testing-and-ci.md#the-scale-ceiling-measured) predates that.
+
 ---
 
 ## Phase 9 — TOTP, generators & one-time links

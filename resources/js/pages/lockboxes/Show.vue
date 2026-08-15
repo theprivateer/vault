@@ -20,6 +20,7 @@ import TextField from '@/components/TextField.vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { describeError } from '@/lib/errors';
 import type { FileRecord } from '@/lib/files';
+import { sealVersion } from '@/lib/history';
 import {
     PAYLOAD_VERSION,
     sealItem,
@@ -200,10 +201,33 @@ async function save(): Promise<void> {
     const uuid = isNew ? uuid7() : (editing.value ?? '');
     const existing = inLockbox.value.find((entry) => entry.record.uuid === uuid);
 
+    /*
+     | An edit has to hand over the payload it is replacing, re-sealed as its
+     | own archived version. The server requires it, because "writes append
+     | rather than overwrite" is only true if a write that does not append is
+     | refused.
+     |
+     | It is sealed here rather than copied server-side on purpose: a copy would
+     | carry the live payload's associated data, so any archived version could
+     | be written back over the live row and would verify — a silent rollback to
+     | a password that was rotated because it leaked. See lib/history.ts.
+     */
+    const superseded = existing?.payload ?? null;
+
+    if (!isNew && superseded === null) {
+        writeFailure.value =
+            'This secret could not be read, so there is nothing to keep as its previous version. ' +
+            'Delete it and add it again — that keeps the unreadable copy rather than writing over it.';
+
+        return;
+    }
+
     let sealed;
+    let archived;
 
     try {
         sealed = await sealItem(crypto(), props.vault.uuid, 'secret.payload', uuid, payload);
+        archived = superseded ? await sealVersion(crypto(), props.vault.uuid, superseded) : null;
     } catch (error) {
         writeFailure.value = describeError(error, 'The secret could not be encrypted.');
 
@@ -219,6 +243,7 @@ async function save(): Promise<void> {
         version: (existing?.record.version ?? 0) + 1,
         sortOrder: existing?.record.sortOrder ?? props.secrets.length,
         linkedLockboxUuid: linkedLockboxUuid === '' ? null : linkedLockboxUuid,
+        historyCount: (existing?.record.historyCount ?? 0) + (archived ? 1 : 0),
         updatedAt: null,
     };
 
@@ -248,7 +273,7 @@ async function save(): Promise<void> {
     } else {
         router.patch(
             `/secrets/${uuid}`,
-            { ...body, expected_version: existing?.record.version ?? 1 },
+            { ...body, ...archived, expected_version: existing?.record.version ?? 1 },
             handlers,
         );
     }

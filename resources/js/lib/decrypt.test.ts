@@ -275,6 +275,7 @@ describe('openVault', () => {
             payloadVersion: PAYLOAD_VERSION,
             keyEpoch: 1,
             updatedAt: null,
+            history: { maxVersions: 20, maxAgeDays: 180, isDefault: true },
             membership: { uuid: OTHER_UUID, role: 'owner', wrappedVaultKey: 'AQE=', keyEpoch: 1 },
         };
 

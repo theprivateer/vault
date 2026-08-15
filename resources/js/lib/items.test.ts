@@ -114,6 +114,7 @@ describe('creating and reopening a vault', () => {
             payloadVersion: sealed.payload_version,
             keyEpoch: 1,
             updatedAt: null,
+            history: { maxVersions: 20, maxAgeDays: 180, isDefault: true },
             membership: {
                 uuid: MEMBERSHIP_UUID,
                 role: 'owner',
@@ -278,6 +279,7 @@ describe('associated data binding', () => {
                 payloadVersion: PAYLOAD_VERSION,
                 keyEpoch: 1,
                 updatedAt: null,
+                history: { maxVersions: 20, maxAgeDays: 180, isDefault: true },
                 membership: {
                     // Someone else's row, carrying this key.
                     uuid: LOCKBOX_UUID,

@@ -104,6 +104,7 @@ async function seedVault(
         payloadVersion: sealedVault.payload_version,
         keyEpoch: 1,
         updatedAt: null,
+        history: { maxVersions: 20, maxAgeDays: 180, isDefault: true },
         membership: {
             uuid: MEMBERSHIP_UUID,
             role: 'owner',
@@ -143,6 +144,7 @@ async function seedVault(
             version: 1,
             sortOrder: records.length,
             linkedLockboxUuid: null,
+            historyCount: 0,
             updatedAt: null,
         });
     }
@@ -410,6 +412,7 @@ describe('optimistic writes', () => {
         version: 1,
         sortOrder: 9,
         linkedLockboxUuid: null,
+        historyCount: 0,
         updatedAt: null,
     });
 

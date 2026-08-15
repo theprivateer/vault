@@ -53,11 +53,24 @@ final class AuditMetadata
         /** The optimistic-concurrency token an edit moved to. */
         'version' => 'int',
 
+        /** Which archived version a restore reached back for. A number, and the
+         *  one fact that makes a restore readable — "went back to version 3"
+         *  says what happened without saying a word about what was in it. */
+        'restored_from' => 'int',
+
+        /** The retention numbers a vault moved to. Already plaintext columns on
+         *  `vaults`; repeating them means the log can answer "when did history
+         *  get shortened, and by whom" without a schema archaeology dig. */
+        'max_versions' => 'int',
+        'max_age_days' => 'int',
+
         /** Whether a second factor was used, and whether it was a backup code. */
         'second_factor' => 'bool',
         'backup_code' => 'bool',
 
-        /** Why a sweep removed something: 'orphan' or 'purged'. */
+        /** Why something was removed: a file sweep says 'orphan' or 'purged',
+         *  a history sweep says 'expired' (too old) or 'retained' (past the
+         *  count a vault keeps). */
         'reason' => 'enum',
 
         /** How many items an operation covered, e.g. secrets deleted with a
@@ -74,7 +87,7 @@ final class AuditMetadata
      *
      * @var list<string>
      */
-    private const ENUM_VALUES = ['owner', 'editor', 'viewer', 'orphan', 'purged'];
+    private const ENUM_VALUES = ['owner', 'editor', 'viewer', 'orphan', 'purged', 'expired', 'retained'];
 
     /**
      * Validates and canonicalises metadata for storage.

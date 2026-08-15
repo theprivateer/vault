@@ -7,6 +7,7 @@ use Database\Factories\SecretFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 /**
@@ -28,6 +29,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * @property int $sort_order
  * @property ?int $linked_lockbox_id
  * @property-read Lockbox $lockbox
+ * @property-read ?int $versions_count
  */
 class Secret extends Model
 {
@@ -84,7 +86,22 @@ class Secret extends Model
     }
 
     /**
-     * @return array{uuid: string, lockboxUuid: string, payloadCt: string, wrappedItemKey: string, payloadVersion: int, version: int, sortOrder: int, linkedLockboxUuid: ?string, updatedAt: ?string}
+     * Every payload this secret used to have.
+     *
+     * Each one is separately encrypted under its own Item Key, so the count is
+     * all the server knows about them. Cascades on hard delete and survives a
+     * soft delete, which is what makes "deleted, restorable for 30 days" mean
+     * the same thing for a secret's history as for the secret.
+     *
+     * @return HasMany<SecretVersion, $this>
+     */
+    public function versions(): HasMany
+    {
+        return $this->hasMany(SecretVersion::class);
+    }
+
+    /**
+     * @return array{uuid: string, lockboxUuid: string, payloadCt: string, wrappedItemKey: string, payloadVersion: int, version: int, sortOrder: int, linkedLockboxUuid: ?string, historyCount: int, updatedAt: ?string}
      */
     public function toClientArray(): array
     {
@@ -108,6 +125,14 @@ class Secret extends Model
             'version' => $this->current_version,
             'sortOrder' => $this->sort_order,
             'linkedLockboxUuid' => $this->linkedLockbox?->uuid,
+            /*
+             | How many superseded payloads exist, so a row can offer a history
+             | link only where there is one. A count and nothing else: what is
+             | in those versions is as opaque to the server here as it is
+             | everywhere else, and it defaults to zero rather than issuing a
+             | query per row when the caller did not ask for it.
+             */
+            'historyCount' => is_numeric($this->versions_count ?? null) ? (int) $this->versions_count : 0,
             'updatedAt' => $this->updated_at?->toIso8601String(),
         ];
     }

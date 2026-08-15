@@ -145,11 +145,12 @@ ciphertexts:
 | Context | `subject_uuid` | `version` |
 | --- | --- | --- |
 | `vault.payload`, `lockbox.payload`, `secret.payload` | the item's own UUID | `payload_version` |
+| `secret.version.payload` | the **version row's** UUID, not the secret's | `payload_version` |
 | `item.key` | the UUID of the item the key belongs to | `1`, fixed |
 | `vault.membership.key` | the **membership** UUID, not the vault's | `1`, fixed |
 | `user.userkey`, `user.privkey.*` | the user's UUID | `1`, fixed |
 
-Two decisions worth stating outright:
+Three decisions worth stating outright:
 
 - **A wrapped key binds to the membership row, not the vault.** Binding to the vault would let a
   server copy one member's sealed Vault Key onto another member's row — which is the substitution
@@ -157,6 +158,8 @@ Two decisions worth stating outright:
 - **Key wrappings pin `version` at 1 rather than following `payload_version`.** A wrapped key is
   32 bytes and has no schema to evolve. Tying it to the payload version would change an item key's
   binding every time an unrelated field was added to the JSON beside it, for no benefit.
+- **An archived version gets its own context *and* its own subject.** Both are load-bearing, and
+  the reason is the whole of [Version history](#version-history) below.
 
 ### Payload padding
 
@@ -499,6 +502,56 @@ audited pure-TS path; the exception is confined to `crypto/chunks.ts`.
   themselves Blobs, so the browser may spill them to disk, but the ceiling is real enough to refuse
   at the top rather than discover at chunk 900. Streaming download via a Service Worker +
   `TransformStream` is the stretch goal and lifts the cap; it is *not* built.
+
+### Version history
+
+An edit does not overwrite; it appends. The browser re-seals the payload it is about to replace as
+a version of its own and posts both in one request:
+
+1. `versionUuid` ← a fresh UUIDv7, minted before anything is encrypted, because it is the AAD
+   subject.
+2. `versionKey` ← 32 random bytes. `versionCt = seal(versionKey, pad(oldPayload), aad =
+   "secret.version.payload" ‖ versionUuid ‖ payloadVersion)`.
+3. `wrap(versionKey)` under the Vault Key, bound as `item.key` at `versionUuid` — the same wrapping
+   every other item gets, which is what lets a re-key cover history without re-encrypting it.
+4. PATCH the secret with the replacement payload *and* those three values. The server writes both
+   rows inside the transaction that guards the optimistic-concurrency check, so a write that loses
+   the race leaves no archive behind.
+
+**The archived ciphertext is a new encryption, never a copy of the column it replaced**, and that
+is the single decision this feature turns on. Copied bytes would carry the associated data they
+were sealed with, binding them to `secret.payload` at the *secret's* UUID — byte-for-byte identical
+to the binding the live column has. A server holding both could then write any archived version
+back over the live row, and every client would verify it happily. Rolling a rotated credential back
+to the one that leaked is the attack that adding history creates; the distinct context and the
+per-version subject are what close it. `lib/history.test.ts` runs exactly that substitution and
+expects a tag failure.
+
+Two consequences, both stated in the interface rather than worked around:
+
+- An edit costs one extra sealed payload on the wire, roughly doubling the bytes a small secret
+  writes.
+- **A secret whose stored ciphertext no longer verifies cannot be edited.** An edit has to archive
+  what it replaces, and nothing can archive what it could not read. Deleting and re-adding is the
+  way past it, and it has the better property anyway: the unreadable row is kept rather than
+  overwritten.
+
+A restore is not a separate cryptographic operation. It is an ordinary edit whose plaintext happens
+to be old — same endpoint, same concurrency guard, same archive of whatever it replaces — so
+"restore is never destructive" is a property of the routing rather than a rule anything has to
+remember. Only the audit entry differs.
+
+Diffing is client-side for the usual reason and a slightly sharper one than D5's: the server cannot
+compare two ciphertexts sealed under different Item Keys, so the browser is not merely the
+preferred place for the comparison, it is the only one.
+
+**Retention is the counterweight**, and the tension is real: history recovers a value somebody
+pasted over by mistake, and history of a value rotated *because it leaked* is a copy of the leaked
+value kept somewhere convenient. The policy is a count and an age, defaulted in `config/vault.php`
+and overridable per vault, plus a purge that erases one secret's history now with no grace period.
+Neither is a control against a member — anyone who could read those versions has already read them
+— but bytes that no longer exist cannot be in next year's stolen backup. See
+[04 § secret_versions](04-data-model.md#secret_versions).
 
 ### One-time share links (D9)
 

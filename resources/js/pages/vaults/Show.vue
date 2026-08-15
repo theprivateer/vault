@@ -12,6 +12,7 @@ import { Head, Link, router, usePage } from '@inertiajs/vue3';
 import { computed, ref, watch } from 'vue';
 
 import NoticePanel from '@/components/NoticePanel.vue';
+import RetentionSettings from '@/components/RetentionSettings.vue';
 import ShareVault from '@/components/ShareVault.vue';
 import TextField from '@/components/TextField.vue';
 import AppLayout from '@/layouts/AppLayout.vue';
@@ -319,6 +320,8 @@ function destroy(): void {
         </div>
 
         <p v-else-if="!failure && !busy" class="mt-6 text-sm text-muted">No lockboxes in this vault yet.</p>
+
+        <RetentionSettings v-if="isOwner" :vault="props.vault" />
 
         <ShareVault
             v-if="isOwner && page.props.auth.user"

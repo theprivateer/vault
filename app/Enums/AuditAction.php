@@ -60,6 +60,25 @@ enum AuditAction: string
      */
     case SecretRevealed = 'secret.revealed';
 
+    /**
+     * Version history (Phase 8).
+     *
+     * A restore is recorded separately from an ordinary edit even though the
+     * server performs exactly the same write, because the two mean different
+     * things to somebody reading the log afterwards: one is a change, and the
+     * other is somebody reaching back for a value that was deliberately
+     * replaced. That distinction is the whole reason for reading a history.
+     *
+     * Purging is destructive and deliberate; pruning is the retention policy
+     * running on a timer. Both remove history, and conflating them would make
+     * it impossible to tell "somebody erased this" from "it aged out".
+     */
+    case SecretRestored = 'secret.restored';
+    case SecretHistoryPurged = 'secret.history_purged';
+    case SecretHistoryPruned = 'secret.history_pruned';
+
+    case VaultRetentionChanged = 'vault.retention_changed';
+
     case FileCreated = 'file.created';
     case FileUploaded = 'file.uploaded';
     case FileDownloaded = 'file.downloaded';
@@ -107,6 +126,10 @@ enum AuditAction: string
             self::SecretUpdated => 'changed a secret',
             self::SecretDeleted => 'deleted a secret',
             self::SecretRevealed => 'revealed a secret',
+            self::SecretRestored => 'restored an earlier version of a secret',
+            self::SecretHistoryPurged => 'erased a secret’s history',
+            self::SecretHistoryPruned => 'had history removed by the retention policy',
+            self::VaultRetentionChanged => 'changed how long this vault keeps history',
             self::FileCreated => 'started a file upload',
             self::FileUploaded => 'finished a file upload',
             self::FileDownloaded => 'downloaded a file',

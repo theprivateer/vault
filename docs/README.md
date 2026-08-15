@@ -41,7 +41,7 @@ opaque to the server; search happens in the browser.
 
 ## Status
 
-**Phases 0 to 7 complete.**
+**Phases 0 to 8 complete.**
 
 - **Phase 0** — Inertia v3 + Vue 3 + TypeScript strict, a strict nonce-based CSP enforced from
   the first render, Larastan at max level, and CI gating every check.
@@ -82,4 +82,12 @@ opaque to the server; search happens in the browser.
   could invent is the one thing it cannot. The chain head is mailed to the operator daily, because
   a server that can recompute every hash still cannot reach yesterday's inbox.
 
-Next: [Phase 8 — version history & rollback](05-implementation-plan.md#phase-8--version-history--rollback).
+- **Phase 8** — version history: an edit appends rather than overwrites, and the archived payload is
+  a *fresh encryption* bound to its own identity rather than a copy of the column it replaced —
+  which is what stops a server writing an old password back over the current one. Diffing is
+  client-side because the server cannot compare two ciphertexts under two keys. Restoring is an
+  ordinary edit carrying old plaintext, so it is never destructive by construction. Retention bounds
+  the liability and a purge ends it outright, because history of a credential rotated *because it
+  leaked* is a copy of the leaked credential kept somewhere convenient.
+
+Next: [Phase 9 — TOTP, generators & one-time links](05-implementation-plan.md#phase-9--totp-generators--one-time-links).

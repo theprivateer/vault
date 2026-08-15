@@ -14,6 +14,7 @@
  * the announcement says so, because someone using a screen reader in a shared
  * room deserves to know their password is now on screen.
  */
+import { Link } from '@inertiajs/vue3';
 import { computed, nextTick, ref, useId } from 'vue';
 
 import NoticePanel from '@/components/NoticePanel.vue';
@@ -130,6 +131,20 @@ async function copy(): Promise<void> {
                     >
                         {{ copied ? 'copied' : 'copy' }}
                     </button>
+                    <!--
+                        Offered only where there is history, so the row does not
+                        advertise a page that would tell the reader nothing. The
+                        count is a plaintext column; what is in those versions is
+                        as opaque to the server as everything else.
+                    -->
+                    <Link
+                        v-if="record.historyCount > 0"
+                        :href="`/secrets/${record.uuid}/history`"
+                        class="text-muted hover:text-ink"
+                        :aria-label="`View the ${record.historyCount} earlier version(s) of ${label}`"
+                    >
+                        history ({{ record.historyCount }})
+                    </Link>
                     <button
                         v-if="canWrite"
                         type="button"

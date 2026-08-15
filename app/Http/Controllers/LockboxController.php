@@ -50,6 +50,13 @@ class LockboxController extends Controller
         $secrets = Secret::query()
             ->whereIn('lockbox_id', $siblings->modelKeys())
             ->with(['lockbox', 'linkedLockbox'])
+            /*
+             | One aggregate rather than a query per row, so a secret can offer
+             | a history link only where there is history. The count is all the
+             | page needs — the versions themselves are fetched by the page that
+             | actually shows them, since each one costs a decrypt.
+             */
+            ->withCount('versions')
             ->orderBy('sort_order')
             ->orderBy('uuid')
             ->get()

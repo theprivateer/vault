@@ -11,10 +11,12 @@ use App\Http\Controllers\FileController;
 use App\Http\Controllers\LockboxController;
 use App\Http\Controllers\PinStoreController;
 use App\Http\Controllers\SecretController;
+use App\Http\Controllers\SecretHistoryController;
 use App\Http\Controllers\UserIdentityController;
 use App\Http\Controllers\VaultController;
 use App\Http\Controllers\VaultMembershipController;
 use App\Http\Controllers\VaultRekeyController;
+use App\Http\Controllers\VaultRetentionController;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
@@ -102,6 +104,16 @@ Route::middleware('auth')->group(function (): void {
         ->name('vaults.destroy');
 
     /*
+     | How long the vault keeps superseded payloads (Phase 8). An administrator
+     | ability rather than a write one — shortening it destroys history for
+     | everybody in the vault, and lengthening it leaves everybody's old
+     | credentials on the server for longer.
+     */
+    Route::patch('/vaults/{vault}/history', [VaultRetentionController::class, 'update'])
+        ->middleware('can:configure,vault')
+        ->name('vaults.history.update');
+
+    /*
      | Sharing (Phase 5).
      |
      | Granting and re-keying are administrator abilities rather than write
@@ -170,6 +182,34 @@ Route::middleware('auth')->group(function (): void {
     Route::delete('/secrets/{secret}', [SecretController::class, 'destroy'])
         ->middleware('can:delete,secret')
         ->name('secrets.destroy');
+
+    /*
+     | Version history (Phase 8).
+     |
+     | Reading history needs only `view`: a member who can read the current
+     | password can read the ones before it, since they hold the Vault Key
+     | either way and pretending otherwise would be a permission that enforces
+     | nothing.
+     |
+     | There is no route that *creates* a version. One is written only as the
+     | other half of an edit, in the same transaction as the update it
+     | supersedes, because a history that can be appended to on its own is a
+     | history that can be made to say something that never happened. Restoring
+     | goes through `secrets.update` for the same reason — it is an ordinary
+     | write carrying an old payload, so it meets the same concurrency guard and
+     | archives whatever it replaces.
+     |
+     | Purging is `update` rather than `delete`: it destroys history without
+     | touching the secret, and requiring the ability to delete the secret in
+     | order to erase its past would be the wrong shape of permission.
+     */
+    Route::get('/secrets/{secret}/history', [SecretHistoryController::class, 'index'])
+        ->middleware('can:view,secret')
+        ->name('secrets.history');
+
+    Route::delete('/secrets/{secret}/history', [SecretHistoryController::class, 'destroy'])
+        ->middleware('can:update,secret')
+        ->name('secrets.history.destroy');
 
     /*
      | Files (Phase 6). The body is chunked, so a file has two routes where a

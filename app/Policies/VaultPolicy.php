@@ -66,6 +66,22 @@ class VaultPolicy
     }
 
     /**
+     * Changing how long the vault keeps superseded payloads.
+     *
+     * An administrator ability rather than a write one, because shortening
+     * retention destroys history for everybody in the vault and lengthening it
+     * keeps everybody's old credentials on the server for longer. An editor may
+     * change what a secret says; deciding how long the previous answers survive
+     * is a policy about other people's data.
+     */
+    public function configure(User $user, Vault $vault): Response
+    {
+        return $vault->roleFor($user)?->canAdminister() === true
+            ? Response::allow()
+            : Response::denyAsNotFound();
+    }
+
+    /**
      * Rotating the Vault Key, which is the second half of revocation.
      *
      * Restricted to administrators for the same reason as `share`, and because a

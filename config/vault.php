@@ -113,6 +113,37 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Version History
+    |--------------------------------------------------------------------------
+    |
+    | Defaults for how much of a secret's past a vault keeps. Either can be
+    | overridden per vault; these apply to any vault that has not said
+    | otherwise, so raising them lifts every vault without an opinion.
+    |
+    | The tension is real and the interface says so out loud: history is what
+    | recovers a value somebody overwrote by mistake, and history of a password
+    | you rotated *because it leaked* is a copy of the leaked password kept
+    | somewhere convenient. Neither number is safe in both directions, which is
+    | why there is also a purge action rather than only a policy.
+    |
+    | `max_versions` is enforced when an edit archives a payload, because that is
+    | the moment the count changes and a bound that only a nightly job applied
+    | would not be a bound. `max_age_days` is enforced by `vault:history-prune`,
+    | since nothing about a secret nobody has touched in a year changes until
+    | the clock does.
+    |
+    | Setting `max_versions` to 0 for a vault turns history off there entirely.
+    |
+    */
+
+    'history' => [
+        'max_versions' => (int) env('VAULT_HISTORY_MAX_VERSIONS', 20),
+
+        'max_age_days' => (int) env('VAULT_HISTORY_MAX_AGE_DAYS', 180),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Audit Log
     |--------------------------------------------------------------------------
     |

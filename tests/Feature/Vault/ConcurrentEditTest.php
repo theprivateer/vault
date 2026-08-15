@@ -6,6 +6,7 @@ use App\Models\User;
 use App\Models\Vault;
 use Database\Factories\EnvelopeFixtures;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Inertia\Testing\AssertableInertia;
 
 /**
@@ -36,8 +37,29 @@ function updatePayload(Secret $secret, array $overrides = []): array
 {
     return [
         ...itemPayload(['payload_version' => 2]),
+        ...archivePayload(),
         'expected_version' => $secret->current_version,
         ...$overrides,
+    ];
+}
+
+/**
+ * The payload an edit replaces, re-sealed as its own version (Phase 8).
+ *
+ * Required on every update, so it belongs in the shared helper rather than in
+ * the history tests alone: an edit that does not append is refused, and a
+ * fixture missing these fields fails validation and then quietly asserts
+ * against a row nothing wrote.
+ *
+ * @return array<string, mixed>
+ */
+function archivePayload(): array
+{
+    return [
+        'version_uuid' => (string) Str::uuid7(),
+        'version_payload_ct' => EnvelopeFixtures::envelope(96),
+        'version_wrapped_item_key' => EnvelopeFixtures::envelope(48),
+        'version_payload_version' => 2,
     ];
 }
 

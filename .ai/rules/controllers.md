@@ -30,3 +30,15 @@ Writing a chunk whose bit is already set returns success and changes nothing. Th
 The row is locked before the bitmap is read (as in VaultRekeyController) — two chunks completing at once would otherwise both read the same bitmap and the second write would erase the first's bit. `uploaded_at` is set in the same transaction that sets the last bit.
 
 Quotas count stored ciphertext, including trashed files, never the plaintext size a client declares. A quota enforced against a claim is not a quota, and ignoring trashed rows would let a vault hold unbounded data by deleting and re-uploading.
+
+## An archived version is a fresh encryption, never a copy of the column it replaced
+The browser re-seals the outgoing payload under `secret.version.payload` at the version row's own UUID and posts it with the edit. Never make the server copy `secrets.payload_ct` into `secret_versions` — the copy carries associated data binding it to `secret.payload` at the secret's UUID, byte-for-byte the same binding the live column has, so any archived version could be written back over the live row and would verify. That is a silent rollback of a credential rotated *because* it leaked.
+
+The four `version_*` fields are required on update, not optional: "writes append rather than overwrite" is only true if a write that does not append is refused. Consequence, and it is intended — a secret whose ciphertext no longer verifies cannot be edited, because nothing can archive what it could not read. Delete and re-add.
+
+The archive is written inside the transaction that guards `current_version`, after the guarded update, so a write that loses the concurrency race leaves no orphan version behind. Guarded by tests/Feature/Vault/HistoryTest.php and resources/js/lib/history.test.ts.
+
+## The re-key item set is every table holding a wrapped Item Key, including the invisible ones
+`itemKeys()` must cover lockboxes, secrets, files AND secret_versions, trashed rows included. Files and archived versions are the easy ones to miss because neither appears on the page an owner is looking at when they rotate — and Phase 6 did miss files, which would have made every attachment in a re-keyed vault permanently unopenable while the request reported success.
+
+The failure is silent in exactly the same way as skipping trashed rows: the client discards the old Vault Key, and nothing later can tell you which items were left behind. The server's defence is refusing an incomplete set, so anything gaining a `wrapped_item_key` column must be added here in the same commit. Caught by "the items nobody remembers" in tests/Feature/Vault/RekeyTest.php.
