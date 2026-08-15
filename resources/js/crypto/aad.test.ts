@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { AadContext } from './aad';
-import { AAD_CONTEXTS, buildAad } from './aad';
+import { AAD_CONTEXTS, buildAad, buildChunkAad } from './aad';
 import { InvalidParameterError } from './errors';
 
 const SUBJECT = '0192f3a1-4b2c-7d3e-8f90-a1b2c3d4e5f6';
@@ -97,5 +97,73 @@ describe('validation', () => {
 
     it('accepts version zero', () => {
         expect(() => buildAad({ context: 'secret.payload', subject: SUBJECT, version: 0 })).not.toThrow();
+    });
+});
+
+/**
+ * The chunk AAD, which is where truncation and reordering are actually stopped.
+ *
+ * Both extra fields matter and they stop different things: the index stops a
+ * chunk being served from another position, and the count stops the file being
+ * cut short. Neither is checked anywhere in the application — the tag is what
+ * enforces them — so what is asserted here is that both really are in the bytes
+ * the cipher will authenticate.
+ */
+describe('file chunks', () => {
+    it('extends the base layout with the index and the count', () => {
+        const aad = buildChunkAad({
+            context: 'file.chunk',
+            subject: SUBJECT,
+            version: 2,
+            chunkIndex: 3,
+            chunkCount: 40,
+        });
+
+        expect(decode(aad)).toBe(['vault.v1', 'file.chunk', SUBJECT, '2', '3', '40'].join(NUL));
+    });
+
+    it('differs for every position, count and file', () => {
+        const base = { context: 'file.chunk' as const, subject: SUBJECT, version: 2 };
+
+        const variants = [
+            buildChunkAad({ ...base, chunkIndex: 0, chunkCount: 40 }),
+            buildChunkAad({ ...base, chunkIndex: 1, chunkCount: 40 }),
+            buildChunkAad({ ...base, chunkIndex: 0, chunkCount: 39 }),
+            buildChunkAad({ ...base, subject: OTHER_SUBJECT, chunkIndex: 0, chunkCount: 40 }),
+        ].map(decode);
+
+        expect(new Set(variants).size).toBe(variants.length);
+    });
+
+    it.each([
+        [-1, 4, 'a negative index'],
+        [4, 4, 'an index at the count'],
+        [5, 4, 'an index past the count'],
+        [1.5, 4, 'a fractional index'],
+        [0, 0, 'a file of no chunks'],
+        [0, -1, 'a negative count'],
+        [0, 1.5, 'a fractional count'],
+    ])('rejects index %p of %p (%s)', (chunkIndex, chunkCount) => {
+        expect(() =>
+            buildChunkAad({
+                context: 'file.chunk',
+                subject: SUBJECT,
+                version: 2,
+                chunkIndex,
+                chunkCount,
+            }),
+        ).toThrow(InvalidParameterError);
+    });
+
+    it('still validates the subject and version it inherits', () => {
+        expect(() =>
+            buildChunkAad({
+                context: 'file.chunk',
+                subject: 'not-a-uuid',
+                version: 2,
+                chunkIndex: 0,
+                chunkCount: 1,
+            }),
+        ).toThrow(InvalidParameterError);
     });
 });

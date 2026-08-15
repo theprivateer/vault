@@ -96,7 +96,11 @@ The server necessarily learns:
   stored at identical size. What remains is the bucket, so a 3 KiB note is still visibly larger
   than a credential. Padding to one fixed size would close it completely and would make every
   password cost as much to store as a document; the buckets are the compromise. Files are not
-  padded, and their sizes leak.
+  padded, and their sizes leak: `files.chunk_count` gives the size to within a chunk on its own,
+  and `ciphertext_size` gives it to the byte. Padding a 100 MiB upload to a bucket would mean
+  storing and transferring an arbitrary amount of nothing, and the cost is real where a payload's
+  is not. A file's *name*, type and hash are all inside its encrypted manifest, so what leaks is
+  how big something is, never what it is.
 - **Membership** — who shares a vault with whom, with what role, and when access was granted or
   revoked. This is social-graph information and it is not hidden. Two parts of it are visible
   because they have to be: `grant_payload` is plaintext, since the recipient must read the bytes

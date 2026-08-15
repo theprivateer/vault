@@ -67,6 +67,14 @@ class Lockbox extends Model
     }
 
     /**
+     * @return HasMany<VaultFile, $this>
+     */
+    public function files(): HasMany
+    {
+        return $this->hasMany(VaultFile::class);
+    }
+
+    /**
      * @return array{uuid: string, payloadCt: string, wrappedItemKey: string, payloadVersion: int, sortOrder: int, secretCount: int, updatedAt: ?string}
      */
     public function toClientArray(): array

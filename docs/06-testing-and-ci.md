@@ -124,6 +124,24 @@ For a short envelope, flip **every bit position** in turn and assert every one t
 codifies the inverse of the 2017 bug, where `DecryptException` was caught and `null` returned.
 Extend with truncation, extension and nonce-swap cases.
 
+### 3b. Chunk binding, and a dishonest server — Phase 6
+
+A file is the one thing here made of many ciphertexts that have to arrive in a particular order, so
+it has an attack surface the single-payload items do not: drop the last chunk, swap two, replay one
+from another file. All three are stopped by the same mechanism — the chunk's index and its file's
+chunk count are inside the AAD — and none of them is stopped by application code, which is the
+point. **No length comparison anywhere detects a truncated file; the tag does.**
+
+Tested in two places, deliberately, because they prove different things:
+
+- `resources/js/crypto/chunks.test.ts` proves the cipher's own guarantee, one operation at a time.
+- `resources/js/lib/files.test.ts` mounts the same attacks across a whole round trip, with the real
+  Worker in-process and a fake server that stores what it is given and hands back **whatever it is
+  told to**. That server is as dishonest as a compromised one: it swaps chunks, drops the last, and
+  shortens the chunk count it reports on the row. The last of those is the interesting case — it
+  fails to do anything, because the count the client loops on came out of the encrypted manifest,
+  and that is a property of where a number is read from rather than of any check.
+
 ### 4. Key material storage (SR7) — outstanding, Phase 11
 
 After unlock, assert `localStorage`, `sessionStorage`, IndexedDB and all cookies are free of key
@@ -152,6 +170,12 @@ should assert.
   parses a payload.
 - **Chain verification** (Phase 7) with deliberate corruption: modify a row, delete a row, reorder
   two rows; each must be detected and the first divergent `seq` reported.
+- **File tests** covering the parts of an attachment the server is responsible for: chunk
+  idempotency, the quota counted in stored bytes rather than declared ones, refusal of an
+  out-of-range index or an unrecognised algorithm byte, and the sweep that removes abandoned
+  uploads and purged files. Plus one that reads the fake disk back and asserts every path is a
+  random UUID with no extension — the direct answer to 2017, where a directory listing was a table
+  of contents.
 - **Enumeration tests** on `/auth/kdf-params` and login: unknown, known and malformed emails all
   return the same shape.
 - **Throttle tests** for per-IP and per-account limits.
@@ -183,6 +207,10 @@ should assert.
   returns. The manual version is to switch the network off in DevTools and keep typing.
 - **A cross-implementation test** comparing a sample of outputs against PHP's `ext-sodium`, to
   catch an encoding or endianness error that JS would otherwise agree with itself about.
+- File tests that run a real upload and download against a fake server
+  ([3b above](#3b-chunk-binding-and-a-dishonest-server--phase-6)), including a resume that refuses
+  when the source has changed — because resuming re-encrypts a chunk at a nonce it has already
+  used, and doing that with different bytes is nonce reuse under GCM.
 
 ## The scale ceiling, measured
 
@@ -255,7 +283,7 @@ Every gate listed as running blocks merge, across three jobs in `.github/workflo
 | PHP static analysis | Larastan, max level | running |
 | PHP tests + coverage | `php artisan test --coverage` | running |
 | **Leak canary** | Pest — currently inside the backend job rather than its own | running |
-| **No decrypt in `app/`** | grep gate for `decrypt`, `Crypt::`, `openssl_`, `sodium_crypto_*_open` (SR2) | running, in the security job |
+| **No decrypt in `app/`** | `NoServerDecryptionTest` (SR2), run again as its own job | running, in the security job |
 | Headers | `SecurityHeadersTest`, asserted against real Vite output (SR10) | running, inside the PHP suite |
 | TS types | `vue-tsc --noEmit` | running |
 | JS lint | ESLint, including `no-restricted-imports` keeping the crypto module app-free | running |
@@ -269,6 +297,15 @@ Every gate listed as running blocks merge, across three jobs in `.github/workflo
 The leak canary was specified as its own job "so a failure is unmissable". It runs inside the
 backend suite instead, which is a real if minor loss — a red backend job does not say *which*
 guarantee broke. Worth splitting out when the CI file is next touched.
+
+**The SR2 gate used to be a `grep` and it was broken.** It matched the *word* `decrypt`, which
+meant `Ciphertext`'s docblock — the one that says it deliberately has no `decrypt()` method —
+tripped the gate that docblock exists to explain, along with five other comments describing the
+rule. A shell grep cannot tell a call from a prose sentence about calls. The security job now runs
+`NoServerDecryptionTest` instead, which tokenises the PHP and strips comments before matching, and
+which also asserts that its own patterns would still fire if a real call were added. It runs twice
+on purpose: once inside the backend suite, and once as a named job so a failure of the single most
+important rule here is a red check with the rule's name on it.
 
 ## Deliberately not tested
 

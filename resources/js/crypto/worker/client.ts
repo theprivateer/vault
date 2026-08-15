@@ -241,6 +241,26 @@ export class CryptoClient {
         );
     }
 
+    /**
+     * Encrypts one chunk of a file.
+     *
+     * One crossing per chunk, unlike `openMany`. Batching would not help: a
+     * chunk is a mebibyte, so the structured clone dwarfs the message overhead
+     * either way, and holding several in flight is what a caller should do to
+     * fill the pipe rather than something this should decide for them.
+     */
+    async sealChunk(request: Omit<Extract<Request, { op: 'sealChunk' }>, 'op'>): Promise<Uint8Array> {
+        const { bytes } = await this.send<{ bytes: Uint8Array }>({ op: 'sealChunk', ...request });
+
+        return bytes;
+    }
+
+    async openChunk(request: Omit<Extract<Request, { op: 'openChunk' }>, 'op'>): Promise<Uint8Array> {
+        const { bytes } = await this.send<{ bytes: Uint8Array }>({ op: 'openChunk', ...request });
+
+        return bytes;
+    }
+
     async unwrapInto(request: Omit<Extract<Request, { op: 'unwrapInto' }>, 'op'>): Promise<void> {
         await this.send({ op: 'unwrapInto', ...request });
     }

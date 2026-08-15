@@ -26,6 +26,7 @@ import { computed, reactive, readonly, shallowRef, type Ref } from 'vue';
 
 import type { CryptoClient } from '@/crypto/worker/client';
 import { openAll, openVault, type Opened, type ProgressCallback } from '@/lib/decrypt';
+import type { FileManifest, FileRecord } from '@/lib/files';
 import type {
     EncryptedItem,
     LockboxPayload,
@@ -40,11 +41,14 @@ import { onLock } from '@/stores/lock';
 
 export type OpenedLockbox = Opened<LockboxRecord, LockboxPayload>;
 export type OpenedSecret = Opened<SecretRecord, SecretPayload>;
+/** A file's manifest, decrypted. The body stays on the server until asked for. */
+export type OpenedFile = Opened<FileRecord, FileManifest>;
 
 export interface VaultContents {
     vault: Opened<VaultRecord, VaultPayload> | null;
     lockboxes: OpenedLockbox[];
     secrets: OpenedSecret[];
+    files: OpenedFile[];
 }
 
 /** What the caller hands over: the ciphertext exactly as the server sent it. */
@@ -52,6 +56,12 @@ export interface VaultSource {
     vault: VaultRecord;
     lockboxes: readonly LockboxRecord[];
     secrets: readonly SecretRecord[];
+    /**
+     * Optional because the vault index does not send them: its list needs
+     * lockbox names and nothing else, and decrypting every manifest in the
+     * vault to render a page that shows none of them would be waste.
+     */
+    files?: readonly FileRecord[];
 }
 
 const state = reactive<{
@@ -63,7 +73,7 @@ const state = reactive<{
     failure: string;
 }>({
     vaultUuid: null,
-    contents: { vault: null, lockboxes: [], secrets: [] },
+    contents: { vault: null, lockboxes: [], secrets: [], files: [] },
     progress: { done: 0, total: 0 },
     busy: false,
     failure: '',
@@ -101,7 +111,7 @@ export function wipe(): void {
     generation++;
 
     state.vaultUuid = null;
-    state.contents = { vault: null, lockboxes: [], secrets: [] };
+    state.contents = { vault: null, lockboxes: [], secrets: [], files: [] };
     state.progress = { done: 0, total: 0 };
     state.busy = false;
     state.failure = '';
@@ -186,7 +196,8 @@ export async function openContents(client: CryptoClient, source: VaultSource): P
     }
 
     const run = generation;
-    const total = source.lockboxes.length + source.secrets.length;
+    const files = source.files ?? [];
+    const total = source.lockboxes.length + source.secrets.length + files.length;
 
     state.busy = true;
     state.failure = '';
@@ -209,7 +220,7 @@ export async function openContents(client: CryptoClient, source: VaultSource): P
              */
             if (run === generation) {
                 state.vaultUuid = source.vault.uuid;
-                state.contents = { vault, lockboxes: [], secrets: [] };
+                state.contents = { vault, lockboxes: [], secrets: [], files: [] };
                 state.failure = vault.error;
             }
 
@@ -234,6 +245,22 @@ export async function openContents(client: CryptoClient, source: VaultSource): P
             (done) => report(done + lockboxes.length, total),
         );
 
+        /*
+         | Only the manifests. A file's body is chunks in object storage and is
+         | fetched when somebody asks for it — decrypting every attachment in a
+         | vault to render a list of their names would be the one place this
+         | design could accidentally become slow in gigabytes rather than
+         | kilobytes.
+         */
+        const opened = await openWithCache<FileRecord, FileManifest>(
+            client,
+            source.vault.uuid,
+            'file.payload',
+            files,
+            'This file',
+            (done) => report(done + lockboxes.length + secrets.length, total),
+        );
+
         // The fence. A lock during the awaits above already emptied the store,
         // and this is what stops the results refilling it.
         if (run !== generation) {
@@ -241,7 +268,7 @@ export async function openContents(client: CryptoClient, source: VaultSource): P
         }
 
         state.vaultUuid = source.vault.uuid;
-        state.contents = { vault, lockboxes, secrets };
+        state.contents = { vault, lockboxes, secrets, files: opened };
         index.value = buildIndex(indexable(lockboxes, secrets));
         state.progress = { done: total, total };
     } finally {
@@ -377,6 +404,8 @@ export function useVaultContents() {
         showProgress: computed(() => state.busy && state.progress.total > 0),
         secretsIn: (lockboxUuid: string) =>
             state.contents.secrets.filter((entry) => entry.record.lockboxUuid === lockboxUuid),
+        filesIn: (lockboxUuid: string) =>
+            state.contents.files.filter((entry) => entry.record.lockboxUuid === lockboxUuid),
         find: (query: string) => search(index.value, query),
         openContents,
         applyOptimistic,

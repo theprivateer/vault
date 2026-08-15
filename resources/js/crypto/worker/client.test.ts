@@ -770,6 +770,105 @@ describe('bulk opening through the client', () => {
     });
 });
 
+/**
+ * File chunks across the boundary.
+ *
+ * These are the only asynchronous operations in the protocol, so they are also
+ * the only ones that could have arrived at a client written for synchronous
+ * replies. The round trip through the fake Worker — structured clone included —
+ * is what proves they did not.
+ */
+describe('file chunks', () => {
+    const VAULT = vaultKeyHandle('0192f3a1-4b2c-7d3e-8f90-a1b2c3d4e5f7');
+    const FILE_UUID = '0192f3a1-4b2c-7d3e-8f90-a1b2c3d4e5fb';
+
+    const keyAad = (subject: string): AadParams => ({ context: 'item.key', subject, version: 1 });
+    const NONCE_PREFIX = new Uint8Array([1, 1, 2, 3, 5, 8, 13, 21]);
+
+    const chunkAad = (chunkIndex: number, chunkCount: number) =>
+        ({
+            context: 'file.chunk',
+            subject: FILE_UUID,
+            version: 2,
+            chunkIndex,
+            chunkCount,
+        }) as const;
+
+    /** Generates a File Key under the vault and returns only the wrapping. */
+    async function newFile(client: CryptoClient): Promise<Uint8Array> {
+        const handle = itemKeyHandle(FILE_UUID);
+
+        await client.generateInto(handle);
+
+        const wrapped = await client.wrapFrom(handle, VAULT, keyAad(FILE_UUID));
+
+        await client.forget(handle);
+
+        return wrapped;
+    }
+
+    it('round-trips a chunk, and leaves no file key behind', async () => {
+        const { client } = clientWithWorker();
+        await client.generateInto(VAULT);
+
+        const wrapped = await newFile(client);
+        const body = utf8ToBytes('a chunk of a file');
+
+        const sealed = await client.sealChunk({
+            using: VAULT,
+            wrapped,
+            keyAad: keyAad(FILE_UUID),
+            plaintext: body,
+            noncePrefix: NONCE_PREFIX,
+            aad: chunkAad(0, 1),
+        });
+
+        const opened = await client.openChunk({
+            using: VAULT,
+            wrapped,
+            keyAad: keyAad(FILE_UUID),
+            chunk: sealed,
+            noncePrefix: NONCE_PREFIX,
+            aad: chunkAad(0, 1),
+        });
+
+        expect(opened).toEqual(body);
+        expect((await client.status()).handles).toEqual([VAULT]);
+    });
+
+    /*
+     | The rejection path. A tag failure inside a promise had to arrive as a
+     | rejected promise on this side rather than as an unhandled rejection in
+     | the Worker, which would leave the caller waiting for a reply forever.
+     */
+    it('reports an integrity failure as a rejection, not a hang', async () => {
+        const { client } = clientWithWorker();
+        await client.generateInto(VAULT);
+
+        const wrapped = await newFile(client);
+
+        const sealed = await client.sealChunk({
+            using: VAULT,
+            wrapped,
+            keyAad: keyAad(FILE_UUID),
+            plaintext: utf8ToBytes('chunk zero of two'),
+            noncePrefix: NONCE_PREFIX,
+            aad: chunkAad(0, 2),
+        });
+
+        const relocated = client.openChunk({
+            using: VAULT,
+            wrapped,
+            keyAad: keyAad(FILE_UUID),
+            chunk: sealed,
+            noncePrefix: NONCE_PREFIX,
+            aad: chunkAad(1, 2),
+        });
+
+        await expect(relocated).rejects.toSatisfy(isIntegrityFailure);
+    });
+});
+
 /*
  | The boundary that broke in the browser while every test here was green.
  |

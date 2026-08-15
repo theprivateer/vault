@@ -13,11 +13,13 @@
 import { Head, Link, router } from '@inertiajs/vue3';
 import { computed, ref, watch } from 'vue';
 
+import FileAttachments from '@/components/FileAttachments.vue';
 import NoticePanel from '@/components/NoticePanel.vue';
 import SecretRow from '@/components/SecretRow.vue';
 import TextField from '@/components/TextField.vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { describeError } from '@/lib/errors';
+import type { FileRecord } from '@/lib/files';
 import {
     PAYLOAD_VERSION,
     sealItem,
@@ -37,6 +39,7 @@ const props = defineProps<{
     lockbox: LockboxRecord;
     secrets: SecretRecord[];
     lockboxes: LockboxRecord[];
+    files: FileRecord[];
 }>();
 
 const { isUnlocked, crypto } = useSession();
@@ -48,6 +51,7 @@ const {
     showProgress,
     openContents,
     secretsIn,
+    filesIn,
     applyOptimistic,
     removeOptimistic,
 } = useVaultContents();
@@ -83,6 +87,8 @@ const openedLockbox = computed(
 );
 
 const inLockbox = computed(() => secretsIn(props.lockbox.uuid));
+
+const attachments = computed(() => filesIn(props.lockbox.uuid));
 
 /**
  * The visible list, narrowed by the filter.
@@ -137,7 +143,7 @@ function emptyDraft(): SecretDraft {
 }
 
 watch(
-    [() => props.vault, () => props.lockboxes, () => props.secrets, isUnlocked],
+    [() => props.vault, () => props.lockboxes, () => props.secrets, () => props.files, isUnlocked],
     async () => {
         if (!isUnlocked.value) {
             return;
@@ -147,6 +153,7 @@ watch(
             vault: props.vault,
             lockboxes: props.lockboxes,
             secrets: props.secrets,
+            files: props.files,
         });
     },
     { immediate: true },
@@ -245,6 +252,29 @@ async function save(): Promise<void> {
             handlers,
         );
     }
+}
+
+/**
+ * Reloads only the file list after an upload.
+ *
+ * Not optimistic, unlike a secret. A secret's plaintext is in hand before the
+ * request goes out; a file's row does not exist until the server has made one,
+ * and the manifest the list renders from is ciphertext this page would have to
+ * invent. Asking for the real row is both simpler and honest about what is
+ * actually stored.
+ */
+function reloadFiles(): void {
+    router.reload({ only: ['files'] });
+}
+
+function removeFile(uuid: string): void {
+    writeFailure.value = '';
+
+    router.delete(`/files/${uuid}`, {
+        onError: (errors) => {
+            writeFailure.value = Object.values(errors)[0] ?? 'The file could not be deleted.';
+        },
+    });
 }
 
 function remove(uuid: string): void {
@@ -375,5 +405,17 @@ function remove(uuid: string): void {
         </template>
 
         <p v-else-if="!failure && !busy" class="mt-6 text-sm text-muted">No secrets in this lockbox yet.</p>
+
+        <FileAttachments
+            v-if="!failure"
+            class="mt-10"
+            :files="attachments"
+            :vault-uuid="vault.uuid"
+            :lockbox-uuid="lockbox.uuid"
+            :can-write="canWrite"
+            :crypto="crypto"
+            @changed="reloadFiles"
+            @remove="removeFile"
+        />
     </AppLayout>
 </template>

@@ -7,6 +7,7 @@ use App\Http\Requests\UpdateItemRequest;
 use App\Models\Lockbox;
 use App\Models\Secret;
 use App\Models\Vault;
+use App\Models\VaultFile;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -52,6 +53,21 @@ class LockboxController extends Controller
             ->get()
             ->map(fn (Secret $secret): array => $secret->toClientArray());
 
+        /*
+         | Files are scoped to this lockbox, unlike the secrets above.
+         |
+         | Secrets are vault-wide because search is client-side and has to reach
+         | the whole vault. An attachment is not searchable — its manifest holds
+         | a filename and a hash, not text anybody types — so sending every
+         | file in the vault would cost a decrypt per manifest for a list nobody
+         | is looking at.
+         */
+        $files = $lockbox->files()
+            ->whereNotNull('uploaded_at')
+            ->orderBy('sort_order')
+            ->orderBy('uuid')
+            ->get();
+
         return Inertia::render('lockboxes/Show', [
             /*
              | The whole vault record, not just its identifier: the browser
@@ -62,6 +78,7 @@ class LockboxController extends Controller
             'lockbox' => $lockbox->toClientArray(),
             'secrets' => $secrets,
             'lockboxes' => $siblings->map(fn (Lockbox $sibling): array => $sibling->toClientArray()),
+            'files' => $files->map(fn (VaultFile $file): array => $file->toClientArray()),
         ]);
     }
 

@@ -2,6 +2,7 @@
 paths:
   - app/Http/Controllers/SecretController.php
   - app/Http/Controllers/VaultRekeyController.php
+  - app/Http/Controllers/FileChunkController.php
 ---
 
 # Controllers
@@ -20,3 +21,12 @@ Three things that are easy to lose in a rewrite:
 - The epoch is compared *after* `lockForUpdate`, never before. Two concurrent owners would otherwise both see epoch 3 and the second would overwrite the first.
 - Trashed lockboxes and secrets are included. They hold item keys under the old Vault Key, and skipping them turns "restorable for 30 days" into "gone".
 - Query-builder updates bypass the Ciphertext cast, so base64 is canonicalised by hand.
+
+## A chunk whose bit is already set is a no-op that succeeds
+`files.received_chunks` is a bitmap, one bit per chunk, not a counter. Chunk uploads are idempotent PUTs, so a client retrying one whose response it never saw would advance a counter twice and declare an incomplete file finished.
+
+Writing a chunk whose bit is already set returns success and changes nothing. That single rule gives idempotency and makes a completed file immutable, and it is why `ciphertext_size` can be an addition rather than a delta.
+
+The row is locked before the bitmap is read (as in VaultRekeyController) — two chunks completing at once would otherwise both read the same bitmap and the second write would erase the first's bit. `uploaded_at` is set in the same transaction that sets the last bit.
+
+Quotas count stored ciphertext, including trashed files, never the plaintext size a client declares. A quota enforced against a claim is not a quota, and ignoring trashed rows would let a vault hold unbounded data by deleting and re-uploading.

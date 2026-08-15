@@ -323,20 +323,29 @@ describe('installHandler', () => {
         return { scope, sent };
     }
 
-    it('replies with the result, correlated by id', () => {
+    /*
+     | Replies are posted from a microtask, because the file-chunk operations
+     | are asynchronous and the handler awaits whatever comes back. Flushing the
+     | queue is what a test has to do that a real Worker gets for free.
+     */
+    const settled = () => Promise.resolve();
+
+    it('replies with the result, correlated by id', async () => {
         const { scope, sent } = fakeScope();
 
         scope.onmessage?.({ data: { id: 7, request: { op: 'status' } } });
+        await settled();
 
         expect(sent).toEqual([{ id: 7, ok: true, result: { unlocked: false, handles: [] } }]);
     });
 
-    it('replies with a serialised error instead of throwing', () => {
+    it('replies with a serialised error instead of throwing', async () => {
         const { scope, sent } = fakeScope(() => {
             throw new TypeError('boom');
         });
 
         expect(() => scope.onmessage?.({ data: { id: 1, request: { op: 'status' } } })).not.toThrow();
+        await settled();
 
         expect(sent).toEqual([
             {
@@ -347,10 +356,32 @@ describe('installHandler', () => {
         ]);
     });
 
-    it('installs a default handler when none is given', () => {
+    /*
+     | A rejected promise must reply exactly as a throw does. This is the case
+     | that matters for downloads: an integrity failure on chunk 40 has to come
+     | back as an error the client can show, not as an unhandled rejection
+     | inside the Worker that leaves the caller waiting forever.
+     */
+    it('replies with a serialised error when the handler rejects', async () => {
+        const { scope, sent } = fakeScope(() => Promise.reject(new TypeError('boom')));
+
+        scope.onmessage?.({ data: { id: 3, request: { op: 'status' } } });
+        await settled();
+
+        expect(sent).toEqual([
+            {
+                id: 3,
+                ok: false,
+                error: { name: 'CryptoError', message: 'The cryptographic operation failed.' },
+            },
+        ]);
+    });
+
+    it('installs a default handler when none is given', async () => {
         const { scope, sent } = fakeScope();
 
         scope.onmessage?.({ data: { id: 2, request: { op: 'lock' } } });
+        await settled();
 
         expect(sent[0]).toEqual({ id: 2, ok: true, result: {} });
     });

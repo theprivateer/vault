@@ -2,6 +2,7 @@
 paths:
   - 'resources/js/lib/**'
   - resources/js/lib/sharing.ts
+  - resources/js/lib/files.ts
 ---
 
 # Lib
@@ -23,3 +24,10 @@ A grant is verified against the granter's *pinned* key. Verifying against the ke
 Verifying a grant is two checks: the signature, and then the signed fields against the membership row. A valid signature over *some* grant is not evidence about *this* row — a server holding any genuine grant could otherwise staple it to a fabricated membership with a role of its choosing.
 
 A changed pin is a hard stop with no one-click override. Re-verifying is a separate, deliberate action.
+
+## Decrypted content never keeps a live object URL
+An object URL is a live handle to decrypted bytes that anything on the page can fetch, and one left behind outlives a lock — the store is wiped and the Worker terminated while the plaintext stays reachable at a `blob:` URL.
+
+Use `withObjectUrl(blob, use)`, which revokes in a `finally`. The one exception is an `<img>` preview, which needs the handle until it decodes: revoke on `load`, on close, on unmount, and on `onLock`.
+
+Previews are an allow-list (`isPreviewable`), never a block-list. `image/svg+xml` is an image and also a document that can run script; `text/html` is the same problem with a different name.

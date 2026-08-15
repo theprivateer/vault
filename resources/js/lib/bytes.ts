@@ -33,6 +33,16 @@ export function fromBase64(value: string): Uint8Array {
  * eye and quoted in grants, where a single canonical spelling matters more than
  * a third fewer characters — base64 has variants, and hex has one.
  */
+export function toHex(bytes: Uint8Array): string {
+    let hex = '';
+
+    for (const byte of bytes) {
+        hex += byte.toString(16).padStart(2, '0');
+    }
+
+    return hex;
+}
+
 export function fromHex(value: string): Uint8Array {
     if (value.length % 2 !== 0 || !/^[0-9a-f]*$/.test(value)) {
         throw new Error(`Expected lowercase hex with an even length, received: ${value}`);

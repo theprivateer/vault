@@ -5,12 +5,13 @@ use App\Models\Lockbox;
 use App\Models\Secret;
 use App\Models\User;
 use App\Models\Vault;
+use App\Models\VaultFile;
 use App\Models\VaultMembership;
 use Database\Factories\EnvelopeFixtures;
 use Illuminate\Support\Str;
 
 /**
- * @return array{user: User, vault: Vault, lockbox: Lockbox, secret: Secret}
+ * @return array{user: User, vault: Vault, lockbox: Lockbox, secret: Secret, file: VaultFile}
  */
 function vaultTree(?User $owner = null, VaultRole $role = VaultRole::Owner): array
 {
@@ -18,17 +19,29 @@ function vaultTree(?User $owner = null, VaultRole $role = VaultRole::Owner): arr
     $vault = Vault::factory()->for($user, 'owner')->withMember($user, $role)->create();
     $lockbox = Lockbox::factory()->for($vault)->create();
     $secret = Secret::factory()->for($lockbox)->create();
+    $file = VaultFile::factory()->uploaded()->for($lockbox)->create();
 
-    return ['user' => $user, 'vault' => $vault, 'lockbox' => $lockbox, 'secret' => $secret];
+    return [
+        'user' => $user,
+        'vault' => $vault,
+        'lockbox' => $lockbox,
+        'secret' => $secret,
+        'file' => $file,
+    ];
 }
 
 /**
  * Every request another user could make against a resource they do not hold a
  * membership for.
  *
+ * The chunk routes are in here rather than only on the file row, because they
+ * are the ones that carry a body and the ones a resumable upload leaves open
+ * for hours. An authorisation check that ran when a file was created and not
+ * when its bytes arrive would leave exactly the wrong window unguarded.
+ *
  * @return array<int, array{string, string}>
  */
-function everyRoute(Vault $vault, Lockbox $lockbox, Secret $secret): array
+function everyRoute(Vault $vault, Lockbox $lockbox, Secret $secret, VaultFile $file): array
 {
     return [
         ['get', "/vaults/{$vault->uuid}"],
@@ -39,8 +52,13 @@ function everyRoute(Vault $vault, Lockbox $lockbox, Secret $secret): array
         ['patch', "/lockboxes/{$lockbox->uuid}"],
         ['delete', "/lockboxes/{$lockbox->uuid}"],
         ['post', "/lockboxes/{$lockbox->uuid}/secrets"],
+        ['post', "/lockboxes/{$lockbox->uuid}/files"],
         ['patch', "/secrets/{$secret->uuid}"],
         ['delete', "/secrets/{$secret->uuid}"],
+        ['get', "/files/{$file->uuid}/status"],
+        ['get', "/files/{$file->uuid}/chunks/0"],
+        ['put', "/files/{$file->uuid}/chunks/0"],
+        ['delete', "/files/{$file->uuid}"],
     ];
 }
 
@@ -59,7 +77,7 @@ describe('IDOR', function () {
 
         $statuses = [];
 
-        foreach (everyRoute($tree['vault'], $tree['lockbox'], $tree['secret']) as [$method, $url]) {
+        foreach (everyRoute($tree['vault'], $tree['lockbox'], $tree['secret'], $tree['file']) as [$method, $url]) {
             $statuses["{$method} {$url}"] = $this->actingAs($stranger)->call(strtoupper($method), $url)->status();
         }
 
@@ -95,6 +113,7 @@ describe('IDOR', function () {
 
         $this->actingAs($tree['user'])->get("/lockboxes/{$tree['lockbox']->uuid}")->assertNotFound();
         $this->actingAs($tree['user'])->delete("/secrets/{$tree['secret']->uuid}")->assertNotFound();
+        $this->actingAs($tree['user'])->get("/files/{$tree['file']->uuid}/status")->assertNotFound();
     });
 
     it('answers 404 for secrets of a deleted lockbox', function () {
@@ -107,7 +126,7 @@ describe('IDOR', function () {
     it('requires authentication for every route', function () {
         $tree = vaultTree();
 
-        foreach (everyRoute($tree['vault'], $tree['lockbox'], $tree['secret']) as [$method, $url]) {
+        foreach (everyRoute($tree['vault'], $tree['lockbox'], $tree['secret'], $tree['file']) as [$method, $url]) {
             $this->call(strtoupper($method), $url)->assertRedirect('/login');
         }
 
@@ -135,8 +154,11 @@ describe('roles', function () {
             ['patch', "/lockboxes/{$tree['lockbox']->uuid}"],
             ['delete', "/lockboxes/{$tree['lockbox']->uuid}"],
             ['post', "/lockboxes/{$tree['lockbox']->uuid}/secrets"],
+            ['post', "/lockboxes/{$tree['lockbox']->uuid}/files"],
             ['patch', "/secrets/{$tree['secret']->uuid}"],
             ['delete', "/secrets/{$tree['secret']->uuid}"],
+            ['put', "/files/{$tree['file']->uuid}/chunks/0"],
+            ['delete', "/files/{$tree['file']->uuid}"],
         ] as [$method, $url]) {
             $statuses["{$method} {$url}"] = $this->actingAs($tree['user'])->call(strtoupper($method), $url)->status();
         }

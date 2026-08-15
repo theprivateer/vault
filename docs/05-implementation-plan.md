@@ -314,7 +314,7 @@ Grant, accept, revoke — with fingerprint verification, signed grants and re-ke
   every item key is a different ciphertext and `key_epoch` advanced.
 - A deliberately interrupted re-key leaves the vault fully on the old epoch, never mixed.
 
-### Carried forward
+### Carried forward from Phase 5
 
 Tasks 1–8 are built and every exit criterion above has a passing test. **Task 9 is not.** Ownership
 transfer and the guard against deleting a shared vault are both still outstanding, and the two are
@@ -350,6 +350,25 @@ Round-trip a 500 MiB file; byte-identical SHA-256. Tamper tests fail closed. No 
 after a delete-and-purge cycle. Object storage contains no filenames or extensions.
 
 **Stretch:** streaming download via Service Worker + `TransformStream`, which removes the cap.
+
+### Carried forward from Phase 6
+
+Tasks 1–7 are built, and the tamper, orphan and object-storage criteria all have passing tests —
+`resources/js/crypto/chunks.test.ts` for the cipher's own guarantees, `resources/js/lib/files.test.ts`
+for the same attacks mounted by a dishonest server across a whole round trip, and
+`tests/Feature/Vault/FileTest.php` for quotas, idempotency and the sweep. The leak canary gained a
+file case, so a filename reaching a column, a log or a path fails the build.
+
+**The 500 MiB round trip is not one of them.** This build caps a file at 100 MiB
+(`vault.files.max_bytes`) because a download is reassembled in the browser, so the number in that
+criterion belongs to the streaming stretch goal rather than to what is here. The round trip is
+tested across many chunks at kilobyte sizes, which exercises every boundary the size would; what
+is untested is the scale. Say that rather than quietly restating the criterion at a size that
+passes.
+
+**Also outstanding:** the streaming download itself, and parallel chunk uploads. Chunks go one at a
+time, which is slower than the connection allows and was the right trade while the ordering and
+resume story was being settled. Both are measurements away, not designs away.
 
 ---
 

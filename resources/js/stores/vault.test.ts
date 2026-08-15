@@ -12,6 +12,7 @@ import { CryptoClient } from '@/crypto/worker/client';
 import { installHandler, type WorkerScope } from '@/crypto/worker/handler';
 import type { Reply, Request } from '@/crypto/worker/protocol';
 import { fromBase64, toBase64 } from '@/lib/bytes';
+import type { FileRecord } from '@/lib/files';
 import {
     loadIdentity,
     PAYLOAD_VERSION,
@@ -24,7 +25,14 @@ import {
 } from '@/lib/items';
 
 import { lock, markAuthenticated, resetSession } from './session';
-import { applyOptimistic, openContents, removeOptimistic, useVaultContents, wipe } from './vault';
+import {
+    applyOptimistic,
+    openContents,
+    removeOptimistic,
+    useVaultContents,
+    wipe,
+    type VaultSource,
+} from './vault';
 
 const USER_UUID = '0192f3a1-4b2c-7d3e-8f90-a1b2c3d4e5f6';
 const VAULT_UUID = '0192f3a1-4b2c-7d3e-8f90-a1b2c3d4e5f7';
@@ -483,6 +491,115 @@ describe('optimistic writes', () => {
 
         expect(() => removeOptimistic(uuidAt(99))()).not.toThrow();
         expect(useVaultContents().contents.value.secrets).toHaveLength(1);
+    });
+});
+
+/**
+ * Files in the store hold their *manifest*, not their contents.
+ *
+ * The distinction is the point: a vault with a gigabyte of attachments must
+ * cost the same to open as one without, so the body stays on the server until
+ * somebody asks for a specific file.
+ */
+describe('files', () => {
+    /** One attached file, sealed the way an upload would have sealed it. */
+    async function withFile(
+        crypto: CryptoClient,
+        source: VaultSource,
+        uuid: string,
+        filename: string,
+    ): Promise<VaultSource & { files: FileRecord[] }> {
+        const manifest = {
+            filename,
+            mime: 'application/pdf',
+            sha256: '00'.repeat(32),
+            chunkCount: 2,
+            chunkSize: 1024,
+            plaintextSize: 1500,
+            noncePrefix: 'AAAAAAAAAAA=',
+        };
+
+        const sealed = await sealItem(crypto, VAULT_UUID, 'file.payload', uuid, manifest);
+
+        const record: FileRecord = {
+            uuid,
+            lockboxUuid: LOCKBOX_UUID,
+            payloadCt: sealed.payload_ct,
+            wrappedItemKey: sealed.wrapped_item_key,
+            payloadVersion: PAYLOAD_VERSION,
+            chunkCount: 2,
+            ciphertextSize: 1536,
+            uploadedAt: '2026-08-15T00:00:00+00:00',
+            sortOrder: 0,
+            updatedAt: null,
+        };
+
+        return { ...source, files: [...(source.files ?? []), record] };
+    }
+
+    it('decrypts each manifest and groups them by lockbox', async () => {
+        const crypto = client();
+        const seeded = await seedVault(crypto, [{ uuid: uuidAt(1), payload: secret('AWS', 'a') }]);
+        const source = await withFile(crypto, seeded, uuidAt(9), 'contract — signed.pdf');
+
+        await openContents(crypto, source);
+
+        const { contents, filesIn } = useVaultContents();
+
+        expect(contents.value.files.map((entry) => entry.payload?.filename)).toEqual([
+            'contract — signed.pdf',
+        ]);
+        expect(filesIn(LOCKBOX_UUID)).toHaveLength(1);
+        expect(filesIn(OTHER_VAULT_UUID)).toEqual([]);
+    });
+
+    it('counts files in the progress total', async () => {
+        const crypto = client();
+        const seeded = await seedVault(crypto, [{ uuid: uuidAt(1), payload: secret('AWS', 'a') }]);
+        const source = await withFile(crypto, seeded, uuidAt(9), 'notes.txt');
+
+        await openContents(crypto, source);
+
+        // One lockbox, one secret, one file.
+        expect(useVaultContents().progress.value).toEqual({ done: 3, total: 3 });
+    });
+
+    it('reports a file whose manifest will not verify, rather than hiding it', async () => {
+        const crypto = client();
+        const seeded = await seedVault(crypto, [{ uuid: uuidAt(1), payload: secret('AWS', 'a') }]);
+        const source = await withFile(crypto, seeded, uuidAt(9), 'contract.pdf');
+
+        // Bound to a different file's uuid, which is exactly the substitution
+        // the AAD exists to catch.
+        const files = source.files.map((record) => ({ ...record, uuid: uuidAt(10) }));
+
+        await openContents(crypto, { ...source, files });
+
+        const [entry] = useVaultContents().contents.value.files;
+
+        expect(entry?.payload).toBeNull();
+        expect(entry?.error).toContain('This file');
+    });
+
+    it('is emptied by a wipe with everything else', async () => {
+        const crypto = client();
+        const seeded = await seedVault(crypto, [{ uuid: uuidAt(1), payload: secret('AWS', 'a') }]);
+
+        await openContents(crypto, await withFile(crypto, seeded, uuidAt(9), 'notes.txt'));
+
+        wipe();
+
+        expect(useVaultContents().contents.value.files).toEqual([]);
+    });
+
+    it('opens a vault whose page sent no files at all', async () => {
+        const crypto = client();
+        const source = await seedVault(crypto, [{ uuid: uuidAt(1), payload: secret('AWS', 'a') }]);
+
+        // The vault index does not send them, and must still open.
+        await openContents(crypto, source);
+
+        expect(useVaultContents().contents.value.files).toEqual([]);
     });
 });
 

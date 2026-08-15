@@ -3,6 +3,7 @@ paths:
   - 'resources/js/crypto/**'
   - resources/js/crypto/padding.ts
   - resources/js/crypto/grant.ts
+  - resources/js/crypto/chunks.ts
 ---
 
 # Crypto
@@ -31,3 +32,12 @@ A self-signature, a grant and (from Phase 7) an audit entry are all Ed25519 sign
 The Worker's `signGrant` op takes a *grant*, not bytes, and applies the separator itself. Do not add a general "sign these bytes" operation: a signing oracle would let injected script obtain the user's signature on anything the format ever grows to cover, from one foothold.
 
 `grant_payload` is stored as the exact bytes signed, so `parseGrant` must not re-canonicalise and compare — that would invalidate every signature the day the serialisation changes, which is the one thing storing exact bytes exists to prevent. Safety comes from the `v` version check plus comparing every meaningful field against the membership row.
+
+## File chunks are AES-GCM with a counted nonce, and the AAD is what stops truncation
+File bodies are the one exception to XChaCha20-Poly1305: AES-256-GCM via WebCrypto, because it is hardware-accelerated and a 100 MiB upload is the only place that matters. Keep the exception inside crypto/chunks.ts.
+
+The nonce is `noncePrefix(8 random, per file) ‖ index(4 BE)`, not random. GCM's 96-bit nonce is too short to generate randomly, and a repeat under one key is a total break, not a degradation. It is derived rather than stored, so there is no nonce field a server could substitute.
+
+Every chunk's AAD binds its index AND its file's chunk count. The count is what makes truncation fail the tag — with only the index, dropping the last chunk leaves every remaining one verifying. Both numbers must come from the encrypted manifest, never from the server's row.
+
+A resume re-encrypts a chunk at a nonce it already used. That is safe only if the bytes are identical, so lib/files.ts verifies the source against the manifest's SHA-256 before sending anything. Never relax that check.

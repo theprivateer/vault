@@ -175,6 +175,88 @@ it('never writes a secret\'s plaintext anywhere it controls', function () {
     );
 });
 
+/*
+ | The same sweep over a file attachment, which is the one thing that leaves the
+ | database entirely.
+ |
+ | 2017 wrote uploads to disk under a name derived from the original and kept
+ | `original_name`, `file_type` and `extension` as plaintext columns — a
+ | directory listing was a table of contents. This asserts that neither the name
+ | nor the body survives anywhere the server controls, and that a client sending
+ | them as fields cannot talk the server into keeping them.
+ */
+it('never writes a file\'s name or contents anywhere it controls', function () {
+    $filename = canarySentinel('FILENAME');
+    $contents = canarySentinel('FILEBODY');
+
+    /*
+     | Faked so the sweep sees exactly what this test wrote and nothing else,
+     | and so a test does not leave a chunk in a developer's storage directory.
+     | The other cases here deliberately sweep the real disk instead, where a
+     | stray write from anywhere in the application would show up.
+     */
+    Storage::fake('local');
+
+    $user = User::factory()->create(['handle' => 'file-canary']);
+    $vault = Vault::factory()->ownedBy($user)->create();
+    $lockbox = Lockbox::factory()->for($vault)->create();
+    $uuid = (string) Str::uuid7();
+
+    // The manifest, holding the filename, exactly as a browser would seal it.
+    $payloadCt = canaryEnvelope(json_encode([
+        'filename' => $filename,
+        'mime' => 'text/plain',
+        'chunkCount' => 1,
+    ]) ?: '');
+
+    $this->actingAs($user)
+        ->post("/lockboxes/{$lockbox->uuid}/files", [
+            'uuid' => $uuid,
+            'payload_ct' => $payloadCt,
+            'wrapped_item_key' => EnvelopeFixtures::envelope(48),
+            'payload_version' => 2,
+            'chunk_count' => 1,
+            // Sent the way a careless client would. Must be discarded.
+            'filename' => $filename,
+            'original_name' => $filename,
+            'extension' => 'txt',
+            'mime' => 'text/plain',
+        ])
+        ->assertRedirect();
+
+    // A chunk whose *plaintext* holds the sentinel. Encrypted here, because a
+    // real one would be, and the point is that the ciphertext is all that lands.
+    $chunk = chr(1).chr(2).sodium_crypto_aead_aes256gcm_encrypt(
+        $contents,
+        'vault.v1',
+        random_bytes(12),
+        random_bytes(32)
+    );
+
+    $this->actingAs($user)
+        ->call('PUT', "/files/{$uuid}/chunks/0", content: $chunk)
+        ->assertOk();
+
+    $haystack = canaryHaystack();
+
+    // Not vacuous: the chunk really did land on the disk being swept.
+    expect(Storage::disk('local')->allFiles())->toHaveCount(1)
+        ->and(implode('', $haystack))->toContain($payloadCt);
+
+    assertCanaryAbsent($haystack, $filename, 'A filename reached a column, a log or the disk');
+    assertCanaryAbsent($haystack, $contents, 'A file body was stored or logged in the clear');
+
+    /*
+     | And the path itself says nothing. An extension or a name-derived
+     | directory would leak the same information as the old column did, without
+     | any row to point at.
+     */
+    foreach (Storage::disk('local')->allFiles() as $path) {
+        expect($path)->not->toContain($filename)
+            ->and(pathinfo($path, PATHINFO_EXTENSION))->toBe('');
+    }
+});
+
 it('leaks nothing through a request that fails validation', function () {
     $plaintext = canarySentinel('REJECTED');
 

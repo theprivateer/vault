@@ -11,7 +11,7 @@
  * and every request is a candidate for the audit log. See adversary A7 in
  * docs/02-threat-model.md.
  */
-import type { AadParams } from '../aad';
+import type { AadParams, ChunkAadParams } from '../aad';
 import type { Grant } from '../grant';
 import type { KdfParams } from '../primitives';
 
@@ -72,6 +72,27 @@ export interface BulkOpenItem {
  */
 export type BulkOpenResult = { ok: true; bytes: Uint8Array } | { ok: false; error: SerialisedError };
 
+/**
+ * One chunk of a file, and the wrapped File Key that covers it.
+ *
+ * The key travels with every chunk rather than being unwrapped once and held
+ * under a handle, for the same reason bulk opens never store an Item Key: a
+ * five-hundred-chunk upload would otherwise leave a live file key in the
+ * keyring for the whole transfer, and there is nothing it could be needed for
+ * afterwards. Unwrapping costs one ChaCha20 pass over 32 bytes per chunk, which
+ * against a mebibyte of AES is not measurable.
+ */
+export interface ChunkRequest {
+    /** The Vault Key handle the File Key is wrapped under. */
+    using: KeyHandle;
+    wrapped: Uint8Array;
+    keyAad: AadParams;
+    /** Random, per file, from the encrypted manifest. Not secret. */
+    noncePrefix: Uint8Array;
+    /** Binds the chunk to its file, its index and the file's chunk count. */
+    aad: ChunkAadParams;
+}
+
 export type Request =
     | {
           op: 'unlock';
@@ -121,6 +142,14 @@ export type Request =
      | error and leaves the measured time where it belongs, in the cipher.
      */
     | { op: 'openMany'; items: BulkOpenItem[] }
+    /*
+     | File bodies (Phase 6). One chunk in, one chunk out, and the only pair of
+     | operations in the protocol that are genuinely asynchronous — they run
+     | AES-GCM through WebCrypto rather than the pure-TS cipher everything else
+     | uses. See crypto/chunks.ts for why files get the exception.
+     */
+    | (ChunkRequest & { op: 'sealChunk'; plaintext: Uint8Array })
+    | (ChunkRequest & { op: 'openChunk'; chunk: Uint8Array })
     | { op: 'unwrapInto'; handle: KeyHandle; using: KeyHandle; wrapped: Uint8Array; aad: AadParams }
     /*
      | The item-key operations. Between them they build and walk the lower half
@@ -146,7 +175,7 @@ export type Request =
 
 export type ResponseFor<R extends Request['op']> = R extends 'status'
     ? { unlocked: boolean; handles: KeyHandle[] }
-    : R extends 'seal' | 'open' | 'wrapFrom' | 'sealToPublicKey'
+    : R extends 'seal' | 'open' | 'wrapFrom' | 'sealToPublicKey' | 'sealChunk' | 'openChunk'
       ? { bytes: Uint8Array }
       : R extends 'openMany'
         ? { results: BulkOpenResult[] }

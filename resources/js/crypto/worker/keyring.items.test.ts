@@ -334,3 +334,138 @@ describe('locking', () => {
         expect(keyring.handles).toEqual([]);
     });
 });
+
+/**
+ * File chunks, which are the one thing the keyring does asynchronously.
+ *
+ * The property under test is the same as everywhere else here: a fresh keyring
+ * holding nothing but the password and the blobs a server would have stored
+ * arrives back at the same plaintext, and every deviation from the exact
+ * position the chunk was sealed at fails instead.
+ */
+describe('file chunks', () => {
+    const FILE_UUID = '0192f3a1-4b2c-7d3e-8f90-a1b2c3d4e5fa';
+    const NONCE_PREFIX = new Uint8Array([9, 8, 7, 6, 5, 4, 3, 2]);
+    const fileKeyAad = aad('item.key', FILE_UUID);
+
+    const chunkAad = (chunkIndex: number, chunkCount: number) =>
+        ({
+            context: 'file.chunk',
+            subject: FILE_UUID,
+            version: 2,
+            chunkIndex,
+            chunkCount,
+        }) as const;
+
+    /** The wrapped File Key, exactly as the row would hold it. */
+    function newFile(keyring: Keyring): Uint8Array {
+        keyring.generateInto(FILE_KEY);
+
+        const wrapped = keyring.wrapFrom(FILE_KEY, VAULT_KEY, fileKeyAad);
+
+        keyring.forget(FILE_KEY);
+
+        return wrapped;
+    }
+
+    const FILE_KEY = itemKeyHandle(FILE_UUID);
+
+    it('round-trips a chunk through a fresh keyring holding only the stored blobs', async () => {
+        const { keyring, account } = openAccount();
+        const stored = createVault(keyring, account.registration.x25519PublicKey);
+        const wrapped = newFile(keyring);
+        const body = utf8ToBytes('the first mebibyte, in spirit');
+
+        const sealed = await keyring.sealChunk({
+            using: VAULT_KEY,
+            wrapped,
+            keyAad: fileKeyAad,
+            plaintext: body,
+            noncePrefix: NONCE_PREFIX,
+            aad: chunkAad(0, 1),
+        });
+
+        const fresh = reopenAccount(account);
+        fresh.openSealedInto(VAULT_KEY, X25519_KEY, stored.wrappedVaultKey, membershipAad);
+
+        const opened = await fresh.openChunk({
+            using: VAULT_KEY,
+            wrapped,
+            keyAad: fileKeyAad,
+            chunk: sealed,
+            noncePrefix: NONCE_PREFIX,
+            aad: chunkAad(0, 1),
+        });
+
+        expect(opened).toEqual(body);
+    });
+
+    /*
+     | The File Key is never stored under a handle. A five-hundred-chunk upload
+     | would otherwise leave a live key in the keyring for the whole transfer,
+     | for no purpose — nothing needs it once the file is written.
+     */
+    it('never leaves the file key in the keyring', async () => {
+        const { keyring, account } = openAccount();
+
+        createVault(keyring, account.registration.x25519PublicKey);
+
+        const wrapped = newFile(keyring);
+        const before = keyring.handles;
+
+        await keyring.sealChunk({
+            using: VAULT_KEY,
+            wrapped,
+            keyAad: fileKeyAad,
+            plaintext: utf8ToBytes('x'),
+            noncePrefix: NONCE_PREFIX,
+            aad: chunkAad(0, 1),
+        });
+
+        expect(keyring.handles).toEqual(before);
+        expect(keyring.handles).not.toContain(FILE_KEY);
+    });
+
+    it('refuses a chunk when the vault is locked', async () => {
+        const keyring = new Keyring();
+
+        await expect(
+            keyring.openChunk({
+                using: VAULT_KEY,
+                wrapped: new Uint8Array(64),
+                keyAad: fileKeyAad,
+                chunk: new Uint8Array(64),
+                noncePrefix: NONCE_PREFIX,
+                aad: chunkAad(0, 1),
+            }),
+        ).rejects.toThrow(KeyUnavailableError);
+    });
+
+    it('fails closed on a chunk served from the wrong position', async () => {
+        const { keyring, account } = openAccount();
+
+        createVault(keyring, account.registration.x25519PublicKey);
+
+        const wrapped = newFile(keyring);
+
+        const sealed = await keyring.sealChunk({
+            using: VAULT_KEY,
+            wrapped,
+            keyAad: fileKeyAad,
+            plaintext: utf8ToBytes('chunk three of ten'),
+            noncePrefix: NONCE_PREFIX,
+            aad: chunkAad(3, 10),
+        });
+
+        await expect(
+            keyring.openChunk({
+                using: VAULT_KEY,
+                wrapped,
+                keyAad: fileKeyAad,
+                chunk: sealed,
+                noncePrefix: NONCE_PREFIX,
+                aad: chunkAad(4, 10),
+            }),
+        ).rejects.toThrow(IntegrityError);
+    });
+});

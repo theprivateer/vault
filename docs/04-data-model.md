@@ -29,13 +29,13 @@ users ──1:N── user_key_wraps          (password / recovery / [prf] wrapp
                                        │
                                        └──1:N── lockboxes
                                                   ├──1:N── secrets ──1:N── secret_versions ·
-                                                  └──1:N── files ·
+                                                  └──1:N── files
 
 audit_events   (hash-chained, standalone) ·
 share_links    (one-time, standalone) ·
 ```
 
-Tables marked `·` are specified here but **not yet migrated** — they belong to phases 6 to 9. The
+Tables marked `·` are specified here but **not yet migrated** — they belong to phases 7 to 9. The
 TOTP seed itself lives on `users` rather than in a table of its own; there was no second column
 worth the join.
 
@@ -260,25 +260,51 @@ re-wrapping, exactly like a live item, and no version is ever re-encrypted.
 recoverable forever. Default to keeping the last 20 versions and 180 days, configurable per vault,
 with a "purge history" action. This tension is worth a UI note.
 
-### `files` (Phase 6 — not yet migrated)
+### `files`
+
+Mapped by `App\Models\VaultFile` rather than a model called `File`, which would collide with a
+Laravel facade and an `Illuminate\Http` class in every controller that touched it.
 
 | Column | Type | Notes |
 | --- | --- | --- |
 | `id` / `uuid` | | |
 | `lockbox_id` | FK cascade | |
-| `payload_ct` | binary | `{filename, mime, sha256, chunkCount, chunkSize, plaintextSize}` |
+| `payload_ct` | binary | `{filename, mime, sha256, chunkCount, chunkSize, plaintextSize, noncePrefix}` |
 | `wrapped_item_key`, `payload_version` | | |
-| `storage_key` | string | random UUID, **no extension** |
+| `storage_key` | uuid unique | random, **no extension**, generated server-side |
 | `storage_disk` | string | |
-| `ciphertext_size` | bigint | plaintext — needed for quotas and billing-free accounting |
-| `nonce_prefix` | binary(8) | per-file AES-GCM nonce prefix; not secret |
+| `chunk_count` | int | bounds an index and marks completion — never an AAD input |
+| `received_chunks` | binary | one bit per chunk; what the server is still waiting for |
+| `ciphertext_size` | bigint | bytes actually written to disk, for quotas |
 | `uploaded_at` | timestamp null | null until all chunks land; drives orphan cleanup |
+| `sort_order` | int | |
 | `timestamps`, `deleted_at` | | |
 
-**Leaks:** file size to within a chunk. Unlike payloads, file bodies are not padded — padding a
-2 GB upload is not worth it — so sizes are a real fingerprint. Named in the threat model.
-Filename, type and hash are all in the payload; 2017 stored `original_name`, `file_type` and
-`extension` as plaintext columns.
+**`ciphertext_size` is the stored ciphertext, not the plaintext.** An earlier draft of this table
+described it as the plaintext size, which the client declares — and a quota enforced against a
+number the client supplies is not a quota. The plaintext size is in the manifest, where the server
+cannot read it and does not need to.
+
+**`received_chunks` is a bitmap, not a counter.** Chunk uploads are idempotent `PUT`s, so a client
+retrying one whose response it never saw would advance a counter a second time and declare an
+incomplete file finished. A bitmap cannot be double-counted, and it also answers *which* chunks
+are missing, which is what a resumed upload needs.
+
+**`chunk_count` is the server's copy and only ever the server's.** The number a client builds a
+chunk AAD from comes out of the encrypted manifest. If the two disagree, the manifest is right —
+a server that could shrink the count a client verified against could truncate a file undetectably,
+which is exactly what binding the count into each chunk's AAD exists to prevent.
+
+**There is no `nonce_prefix` column.** It was specified as one and lives in the manifest instead:
+it is not secret, but the client that computes a nonce should be the only party that has seen the
+ingredients, and a column would earn nothing for the exposure.
+
+**Leaks:** file size to within a chunk from `chunk_count`, and to the byte from `ciphertext_size`.
+Unlike payloads, file bodies are not padded — padding a 100 MiB upload would mean storing and
+transferring an arbitrary amount of nothing — so sizes are a real fingerprint. Named in the threat
+model. Filename, type and hash are all in the payload; 2017 stored `original_name`, `file_type`
+and `extension` as plaintext columns and wrote the upload to disk under a name derived from the
+original, so a directory listing was a table of contents.
 
 ### `audit_events` (Phase 7)
 

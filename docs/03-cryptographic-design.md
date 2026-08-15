@@ -452,23 +452,53 @@ then unlikely to be the whole set either.
 
 ### Files
 
-*Phase 6. Specified, not yet built.*
+Chunked AES-256-GCM via WebCrypto — the one place this design does not use
+XChaCha20-Poly1305. Every target browser implements AES-GCM in hardware, and a 100 MiB upload is
+the only operation here where the difference between a hardware cipher and a very good JavaScript
+one decides whether there is a progress bar or a hung tab. Payloads are kilobytes and stay on the
+audited pure-TS path; the exception is confined to `crypto/chunks.ts`.
 
-Chunked AES-256-GCM via WebCrypto:
-
-- `fileKey` ← 32 random bytes, wrapped by the Vault Key like any other item key.
+- `fileKey` ← 32 random bytes, wrapped by the Vault Key like any other item key. It is unwrapped,
+  used and zeroised **per chunk** rather than held: a 500-chunk transfer would otherwise leave a
+  live key in the keyring for its whole duration, and one ChaCha20 pass over 32 bytes against a
+  mebibyte of AES does not register.
 - Chunk size 1 MiB. `nonce = noncePrefix(8 random bytes, per file) ‖ counter(4 bytes BE)`.
-- Per-chunk AAD: `aad("file.chunk", file_uuid, v) ‖ chunk_index ‖ total_chunks ‖ is_final`.
-  Binding the index and total is what prevents **truncation and reordering** — an attacker who
-  drops the last chunk must otherwise be detected by the application, and here it is detected by
-  the tag.
-- A manifest (chunk count, chunk size, original size, SHA-256 of the plaintext) goes in the
-  encrypted payload, not in a column.
-- Filenames live in `payload_ct`. Object storage keys are random UUIDs with no extension.
-- Upload: encrypt chunk-by-chunk in the Worker, stream to a presigned URL or a chunked endpoint.
-- Download v1: fetch, decrypt to a `Blob`, hand to the browser. **Cap at ~100 MiB** — a Blob is
-  memory-resident. Streaming download via a Service Worker + `TransformStream` is Phase 6's
-  stretch goal and lifts the cap.
+  Constructed rather than random because GCM's nonce is 96 bits, which is too short to generate
+  randomly at scale — and a repeated nonce under one key is a total break of GCM, not a
+  degradation. Counting makes a repeat within a file impossible rather than unlikely.
+- **The nonce is not stored with the chunk.** It is derived from the prefix in the manifest and the
+  index being requested, so there is no nonce field for a server to substitute and 12 bytes per
+  chunk stay off the wire.
+- Chunk on the wire: `[ver:1][alg:1][ciphertext ‖ tag:16]`, `alg = 2` for AES-256-GCM. Raw bytes,
+  not base64 — a chunk endpoint carries no other fields, so there is nothing JSON would be
+  wrapping, and 33% of 100 MiB is the one place the overhead is worth avoiding.
+- Per-chunk AAD: `aad("file.chunk", file_uuid, v) ‖ chunk_index ‖ chunk_count`. Binding the index
+  and the count is what prevents **truncation and reordering** — an attacker who drops the last
+  chunk must otherwise be detected by the application, and here it is detected by the tag.
+  The earlier draft of this section also bound an `is_final` flag; it is not implemented, because
+  `chunk_index == chunk_count - 1` already determines it and a second encoding of one fact is one
+  more thing to get out of step.
+- **Both numbers come from the manifest, never from the response.** The manifest is inside
+  `payload_ct`, so only a client that has decrypted the file's payload knows how many chunks there
+  should be. A client that took the count from the row it is validating would be asking the sender
+  to confirm its own claim, and the truncation defence would evaporate.
+- The manifest holds `{filename, mime, sha256, chunkCount, chunkSize, plaintextSize, noncePrefix}`.
+  All of it is in the encrypted payload, including the nonce prefix — it is not secret, but the
+  client that computes a nonce should be the only party that has seen the ingredients, and a column
+  for it would earn nothing.
+- Filenames live in `payload_ct`. Object storage keys are random UUIDs with no extension, with
+  chunks numbered beneath them.
+- Upload: encrypt chunk-by-chunk in the Worker, `PUT` each to a chunked endpoint. The row is
+  created **before** the first chunk, carrying the sealed manifest and the wrapped File Key, which
+  is what makes an interrupted upload resumable rather than merely restartable.
+- **Resuming re-encrypts a chunk at a nonce that chunk has already used.** That is safe if and only
+  if the bytes are identical, so a resume verifies the source against the manifest's SHA-256 before
+  it sends anything. Continuing with different bytes would be nonce reuse under GCM, which leaks
+  the XOR of the two plaintexts and the authentication subkey with it.
+- Download v1: fetch, decrypt to a `Blob`, hand to the browser. **Cap at ~100 MiB** — the parts are
+  themselves Blobs, so the browser may spill them to disk, but the ceiling is real enough to refuse
+  at the top rather than discover at chunk 900. Streaming download via a Service Worker +
+  `TransformStream` is the stretch goal and lifts the cap; it is *not* built.
 
 ### One-time share links (D9)
 

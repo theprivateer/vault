@@ -92,7 +92,7 @@ jobs:
       - uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ env.PHP_VERSION }}
-          extensions: sodium
+          extensions: sodium, sqlite3, pdo_sqlite
 
       - uses: actions/setup-node@v6
         with:
@@ -105,6 +105,11 @@ jobs:
       - name: Install JS dependencies
         run: npm ci --ignore-scripts
 
+      - name: Prepare environment
+        run: |
+          cp .env.example .env
+          php artisan key:generate
+
       - name: Audit PHP dependencies
         run: composer audit
 
@@ -114,11 +119,16 @@ jobs:
       # SR2: no key capable of decrypting user content may exist on the server,
       # so no server-side decryption path may exist either. See
       # docs/02-threat-model.md.
+      #
+      # Run as its own job as well as inside the backend suite, so a failure of
+      # the single most important rule here is unmissable rather than one line
+      # in a list of two hundred.
+      #
+      # This used to be a `grep` for the word "decrypt". It could not tell a
+      # call from a comment, so `Ciphertext`'s docblock — which says it
+      # deliberately has no decrypt() method — tripped the gate that docblock
+      # exists to explain. The Pest test tokenises the PHP and strips comments
+      # first, which is the only way to get that right, and it also asserts
+      # that the pattern would still fire if a real call were added.
       - name: Assert no server-side decryption
-        run: |
-          if grep -rnE '\b(decrypt|decryptString|Crypt::|openssl_decrypt|sodium_crypto_[a-z_]*_open)\b' \
-               --include='*.php' app/; then
-            echo "::error::Found a server-side decryption path in app/. The server must never be able to decrypt user content (SR2)."
-            exit 1
-          fi
-          echo "No server-side decryption paths found."
+        run: php artisan test --compact tests/Feature/NoServerDecryptionTest.php

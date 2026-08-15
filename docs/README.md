@@ -36,11 +36,12 @@ opaque to the server; search happens in the browser.
 - **Backend** — Laravel 13, PHP 8.4 (`ext-sodium` built in), Pest 5
 - **Frontend** — Inertia v3 + Vue 3 + TypeScript (strict), Tailwind 4, Vite 8
 - **Crypto** — `@noble/ciphers`, `@noble/curves`, `@noble/hashes` in the browser; WebCrypto for
-  RNG, and for bulk file encryption once Phase 6 lands. Nothing on the server.
+  RNG and for bulk file encryption (AES-256-GCM, the one hardware-accelerated exception —
+  [03 § Files](03-cryptographic-design.md#files)). Nothing on the server.
 
 ## Status
 
-**Phases 0 to 5 complete.**
+**Phases 0 to 6 complete.**
 
 - **Phase 0** — Inertia v3 + Vue 3 + TypeScript strict, a strict nonce-based CSP enforced from
   the first render, Larastan at max level, and CI gating every check.
@@ -68,4 +69,10 @@ opaque to the server; search happens in the browser.
   when a key changes, and revocation that triggers an atomic re-key at exactly `key_epoch + 1`.
   The phase where the asymmetric layer earns its place.
 
-Next: [Phase 6 — encrypted file attachments](05-implementation-plan.md#phase-6--encrypted-file-attachments).
+- **Phase 6** — encrypted file attachments: chunked AES-256-GCM through WebCrypto, with each
+  chunk's index and its file's chunk count bound into the AAD, so truncation and reordering fail
+  the tag rather than an application check. Resumable uploads, per-vault quotas, an orphan sweep,
+  and filenames that exist only inside the encrypted manifest. Capped at 100 MiB pending the
+  [streaming download](05-implementation-plan.md#carried-forward-from-phase-6).
+
+Next: [Phase 7 — tamper-evident audit log](05-implementation-plan.md#phase-7--tamper-evident-audit-log).

@@ -83,13 +83,72 @@ export function buildAad({ context, subject, version }: AadParams): Uint8Array {
         throw new InvalidParameterError(`AAD version must be a non-negative integer, received: ${version}`);
     }
 
-    const parts = [AAD_PREFIX, context, normalised, String(version)].map(utf8ToBytes);
+    return join([AAD_PREFIX, context, normalised, String(version)]);
+}
 
-    const totalLength = parts.reduce((sum, part) => sum + part.length, 0) + parts.length - 1;
+/**
+ * A file chunk's position within its file, bound into the chunk's own AAD.
+ *
+ * `chunkCount` is not decoration. Binding the index alone would let a server
+ * serve chunks 0..n-2 of an n-chunk file and have every one of them verify —
+ * **truncation would be undetectable by the tag** and would fall to the
+ * application noticing a short read, which is exactly the kind of check that
+ * gets skipped. With the count inside the AAD, a chunk sealed as "3 of 40" only
+ * ever opens as "3 of 40".
+ *
+ * The spec in docs/03 also listed an `is_final` flag. It is not here because it
+ * carries no information: `chunkIndex === chunkCount - 1` already determines it,
+ * and a second encoding of the same fact is one more thing to get out of step.
+ */
+export interface ChunkAadParams extends AadParams {
+    context: 'file.chunk';
+    chunkIndex: number;
+    chunkCount: number;
+}
+
+/**
+ * Builds the associated data for one chunk of a file.
+ *
+ *   AAD = "vault.v1" ‖ 0x00 ‖ "file.chunk" ‖ 0x00 ‖ uuid ‖ 0x00 ‖ version
+ *                    ‖ 0x00 ‖ index ‖ 0x00 ‖ count
+ *
+ * **Both numbers must come from the manifest, never from the server.** The
+ * manifest lives inside `payload_ct`, so a client that has opened the file's
+ * payload already knows how many chunks there should be; a client that took the
+ * count from the response it is validating would be asking the sender to
+ * confirm its own claim.
+ */
+export function buildChunkAad({
+    context,
+    subject,
+    version,
+    chunkIndex,
+    chunkCount,
+}: ChunkAadParams): Uint8Array {
+    if (!Number.isSafeInteger(chunkCount) || chunkCount < 1) {
+        throw new InvalidParameterError(`A file must have at least one chunk, received: ${chunkCount}`);
+    }
+
+    if (!Number.isSafeInteger(chunkIndex) || chunkIndex < 0 || chunkIndex >= chunkCount) {
+        throw new InvalidParameterError(
+            `Chunk index ${chunkIndex} is outside a file of ${chunkCount} chunks.`,
+        );
+    }
+
+    const base = buildAad({ context, subject, version });
+
+    return join([base, String(chunkIndex), String(chunkCount)]);
+}
+
+/** NUL-joins the parts. Unambiguous only because no part can contain a NUL. */
+function join(parts: ReadonlyArray<string | Uint8Array>): Uint8Array {
+    const encoded = parts.map((part) => (typeof part === 'string' ? utf8ToBytes(part) : part));
+
+    const totalLength = encoded.reduce((sum, part) => sum + part.length, 0) + encoded.length - 1;
     const aad = new Uint8Array(totalLength);
 
     let offset = 0;
-    parts.forEach((part, index) => {
+    encoded.forEach((part, index) => {
         if (index > 0) {
             aad[offset] = SEPARATOR;
             offset += 1;

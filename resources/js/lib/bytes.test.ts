@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { decodeUtf8, encodeUtf8, fromBase64, toBase64 } from './bytes';
+import { decodeUtf8, encodeUtf8, fromBase64, fromHex, toBase64, toHex } from './bytes';
 
 describe('base64', () => {
     it('round trips arbitrary bytes', () => {
@@ -35,5 +35,21 @@ describe('utf-8', () => {
 
     it('encodes multi-byte characters correctly', () => {
         expect(encodeUtf8('🔐')).toEqual(Uint8Array.from([0xf0, 0x9f, 0x94, 0x90]));
+    });
+});
+
+describe('hex', () => {
+    it('round trips, in lowercase with leading zeros kept', () => {
+        const bytes = Uint8Array.from({ length: 256 }, (_value, index) => index);
+
+        expect(toHex(bytes)).toMatch(/^[0-9a-f]{512}$/);
+        expect(fromHex(toHex(bytes))).toEqual(bytes);
+    });
+
+    it('pads every byte to two characters', () => {
+        // A missing pad would shorten the string and silently shift every
+        // byte after it — a file hash that compared equal to the wrong file.
+        expect(toHex(Uint8Array.from([0x00, 0x0f, 0xff]))).toBe('000fff');
+        expect(toHex(new Uint8Array(0))).toBe('');
     });
 });

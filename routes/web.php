@@ -5,6 +5,8 @@ use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\Auth\RecoveryController;
 use App\Http\Controllers\Auth\RegisterController;
 use App\Http\Controllers\Auth\TotpController;
+use App\Http\Controllers\FileChunkController;
+use App\Http\Controllers\FileController;
 use App\Http\Controllers\LockboxController;
 use App\Http\Controllers\PinStoreController;
 use App\Http\Controllers\SecretController;
@@ -134,6 +136,8 @@ Route::middleware('auth')->group(function (): void {
             ->name('lockboxes.update');
         Route::post('/lockboxes/{lockbox}/secrets', [SecretController::class, 'store'])
             ->name('secrets.store');
+        Route::post('/lockboxes/{lockbox}/files', [FileController::class, 'store'])
+            ->name('files.store');
     });
 
     Route::delete('/lockboxes/{lockbox}', [LockboxController::class, 'destroy'])
@@ -147,6 +151,36 @@ Route::middleware('auth')->group(function (): void {
     Route::delete('/secrets/{secret}', [SecretController::class, 'destroy'])
         ->middleware('can:delete,secret')
         ->name('secrets.destroy');
+
+    /*
+     | Files (Phase 6). The body is chunked, so a file has two routes where a
+     | secret has one — and the chunk routes are authorised in their own right
+     | rather than trusting the check that ran when the row was created. An
+     | upload is resumable, which means there is a window during which a real,
+     | half-finished record is waiting for writes; that is exactly the window in
+     | which an unauthorised write would land on somebody else's row.
+     |
+     | `whereNumber` on the index keeps a path segment from ever reaching the
+     | controller as anything but an integer, so the bounds check has an integer
+     | to check.
+     */
+    Route::get('/files/{file}/status', [FileController::class, 'status'])
+        ->middleware('can:view,file')
+        ->name('files.status');
+
+    Route::get('/files/{file}/chunks/{index}', [FileChunkController::class, 'show'])
+        ->middleware('can:view,file')
+        ->whereNumber('index')
+        ->name('files.chunks.show');
+
+    Route::put('/files/{file}/chunks/{index}', [FileChunkController::class, 'store'])
+        ->middleware('can:update,file')
+        ->whereNumber('index')
+        ->name('files.chunks.store');
+
+    Route::delete('/files/{file}', [FileController::class, 'destroy'])
+        ->middleware('can:delete,file')
+        ->name('files.destroy');
 
     Route::post('/account/password', [RecoveryController::class, 'update'])->name('password.update');
     Route::post('/account/recovery-kit', [RecoveryController::class, 'reissue'])

@@ -5,6 +5,7 @@
  * glue stays trivial and this logic can be exercised directly.
  */
 import type { AadContext, AadParams } from '../aad';
+import { openChunk, sealChunk } from '../chunks';
 import { open, seal } from '../envelope';
 import { InvalidParameterError, KeyUnavailableError, MalformedEnvelopeError } from '../errors';
 import type { Grant, SignedGrant } from '../grant';
@@ -22,7 +23,7 @@ import {
 } from '../keys';
 import type { KdfParams } from '../primitives';
 import { KEY_LENGTH, zeroise } from '../primitives';
-import type { BulkOpenItem, KeyHandle } from './protocol';
+import type { BulkOpenItem, ChunkRequest, KeyHandle } from './protocol';
 import { ED25519_KEY, USER_KEY, X25519_KEY } from './protocol';
 
 /**
@@ -68,6 +69,14 @@ export interface RegistrationResult {
     ed25519PrivateKeyCt: Uint8Array;
     selfSignature: Uint8Array;
     fingerprint: Uint8Array;
+}
+
+export interface SealChunkRequest extends ChunkRequest {
+    plaintext: Uint8Array;
+}
+
+export interface OpenChunkRequest extends ChunkRequest {
+    chunk: Uint8Array;
 }
 
 export class Keyring {
@@ -347,6 +356,48 @@ export class Keyring {
             return open(itemKey, envelope, payloadAad);
         } finally {
             zeroise(itemKey);
+        }
+    }
+
+    /**
+     * Encrypts one chunk of a file under its wrapped File Key.
+     *
+     * The File Key is unwrapped, used and zeroised per chunk rather than held —
+     * see `ChunkRequest`. The `finally` is the same discipline as
+     * `openWithWrappedKey`: the key is wiped whether the chunk sealed or not.
+     */
+    async sealChunk({
+        using,
+        wrapped,
+        keyAad,
+        plaintext,
+        noncePrefix,
+        aad,
+    }: SealChunkRequest): Promise<Uint8Array> {
+        const fileKey = unwrapKey(this.require(using), wrapped, keyAad);
+
+        try {
+            return await sealChunk(fileKey, plaintext, noncePrefix, aad);
+        } finally {
+            zeroise(fileKey);
+        }
+    }
+
+    /** Decrypts one chunk. Throws if it came from the wrong file or position. */
+    async openChunk({
+        using,
+        wrapped,
+        keyAad,
+        chunk,
+        noncePrefix,
+        aad,
+    }: OpenChunkRequest): Promise<Uint8Array> {
+        const fileKey = unwrapKey(this.require(using), wrapped, keyAad);
+
+        try {
+            return await openChunk(fileKey, chunk, noncePrefix, aad);
+        } finally {
+            zeroise(fileKey);
         }
     }
 
