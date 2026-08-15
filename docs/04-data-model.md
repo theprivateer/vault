@@ -440,6 +440,11 @@ the concrete payoff of giving every item its own key.
 timestamp beside it would record when a stranger opened the link — the kind of fact the audit log
 should hold deliberately rather than a row should accumulate by accident.
 
+`/account/links` renders the rows a user may withdraw, which is exactly the set
+`ShareLinkPolicy::revoke` allows: their own, plus any issued into a vault they administer. The
+`secret_id` foreign key is what makes the second half answerable, and it is why the relation is
+`nullOnDelete` rather than cascading — the row survives its secret, and the page says so.
+
 **The token reaches the server only in a request body**, never a path segment, because a path
 segment is written to every access log in front of the application in the clear. The creator's
 browser sends the *hash* and the recipient's browser sends the *token*; reversing either would put a

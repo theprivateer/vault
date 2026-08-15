@@ -110,6 +110,14 @@ Route::middleware('auth')->group(function (): void {
 
     Route::get('/account/activity', [AuditEventController::class, 'mine'])->name('audit.mine');
 
+    /*
+     | Links this user can withdraw: their own, plus any issued into a vault they
+     | administer. Account-scoped rather than per-vault because the question it
+     | answers — "what have I left outstanding?" — spans vaults, and because a
+     | link whose secret has been deleted has no vault to be listed under.
+     */
+    Route::get('/account/links', [ShareLinkController::class, 'index'])->name('links.index');
+
     Route::post('/vaults', [VaultController::class, 'store'])->name('vaults.store');
 
     Route::middleware('can:view,vault')->group(function (): void {

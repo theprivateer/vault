@@ -3,14 +3,20 @@
 namespace App\Http\Controllers;
 
 use App\Enums\AuditAction;
+use App\Enums\VaultRole;
 use App\Http\Requests\StoreShareLinkRequest;
+use App\Models\Lockbox;
 use App\Models\Secret;
 use App\Models\ShareLink;
+use App\Models\User;
+use App\Models\Vault;
 use App\Support\AuditLog;
 use App\Support\ShareToken;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -112,6 +118,55 @@ class ShareLinkController extends Controller
     }
 
     /**
+     * Every link the current user is able to withdraw.
+     *
+     * **The list is defined by the policy rather than beside it.** A user can
+     * revoke a link they created, or one created by anybody into a vault they
+     * administer — so those are exactly the rows shown. Deriving the page from
+     * the same rule as the ability means there is no second source of truth
+     * about who sees what, and no way for an owner to hold a power over a link
+     * they can never find.
+     *
+     * Rows that can no longer be opened are included until the hourly sweep
+     * removes them. Seeing that a link was used, or expired unopened, is most of
+     * why somebody opens this page — a list of only live links would answer a
+     * narrower question than the one being asked.
+     *
+     * The secrets and vaults travel alongside because a link's *name* is inside
+     * `payload_ct`: the server can say a link exists and when it expires, and
+     * only the browser can say what it points at.
+     */
+    public function index(Request $request): Response
+    {
+        $user = $this->currentUser($request);
+
+        $links = ShareLink::query()
+            ->where(fn (Builder $query): Builder => $query
+                ->where('created_by', $user->getKey())
+                ->orWhereIn('secret_id', $this->secretsAdministeredBy($user)))
+            ->with(['creator', 'secret.lockbox.vault'])
+            ->orderByDesc('created_at')
+            ->get();
+
+        $secrets = $links
+            ->map(fn (ShareLink $link): ?Secret => $link->secret)
+            ->filter()
+            ->unique('id');
+
+        return Inertia::render('share/Links', [
+            'links' => $links->map(fn (ShareLink $link): array => [
+                ...$link->toClientArray(),
+                // Whether this is one of theirs, or one they can withdraw
+                // because they administer the vault it points into. The two read
+                // very differently to somebody scanning the page.
+                'mine' => $link->created_by === $user->getKey(),
+            ]),
+            'secrets' => $secrets->map(fn (Secret $secret): array => $secret->toClientArray())->values(),
+            'vaults' => $this->vaultsFor($secrets, $user),
+        ]);
+    }
+
+    /**
      * Creates a link for one secret.
      *
      * The payload arrives already sealed under a key this server will never
@@ -137,6 +192,60 @@ class ShareLinkController extends Controller
         ]);
 
         return back();
+    }
+
+    /**
+     * Secrets in every vault this user administers, trashed rows included.
+     *
+     * Trashed ones matter: a link outlives the secret it came from, so an owner
+     * tidying up a lockbox must not thereby lose the ability to withdraw links
+     * pointing into it.
+     *
+     * As a subquery rather than a list of identifiers: this feeds a `whereIn`
+     * on a table that may hold links for every vault in the deployment, and
+     * three round trips to build an array the database is about to receive back
+     * is work for nothing.
+     *
+     * @return Builder<Secret>
+     */
+    private function secretsAdministeredBy(User $user): Builder
+    {
+        $vaults = Vault::withTrashed()
+            ->whereHas('memberships', fn (Builder $memberships): Builder => $memberships
+                ->where('user_id', $user->getKey())
+                ->where('role', VaultRole::Owner)
+                ->whereNull('revoked_at'))
+            ->select('id');
+
+        $lockboxes = Lockbox::withTrashed()->whereIn('vault_id', $vaults)->select('id');
+
+        return Secret::withTrashed()->whereIn('lockbox_id', $lockboxes)->select('id');
+    }
+
+    /**
+     * The vault records the browser needs in order to name any of these.
+     *
+     * Only vaults the user still has a live membership of. A link they issued
+     * into a vault they have since been removed from stays listed and stays
+     * revocable — they created it — but nothing can put a name to it any more,
+     * and the page says so rather than showing a blank.
+     *
+     * @param  Collection<int, Secret>  $secrets
+     * @return list<array<string, mixed>>
+     */
+    private function vaultsFor(Collection $secrets, User $user): array
+    {
+        $records = [];
+
+        foreach ($secrets->map(fn (Secret $secret): Vault => $secret->lockbox->vault)->unique('id') as $vault) {
+            $membership = $vault->membershipFor($user);
+
+            if ($membership !== null) {
+                $records[] = $vault->toClientArray($membership);
+            }
+        }
+
+        return $records;
     }
 
     /**

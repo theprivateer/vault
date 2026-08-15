@@ -521,10 +521,18 @@ does not: `Permissions-Policy` denies `camera=()` outright, lifting that would w
 currently denies everything, and a QR decoder is another dependency for a path that ends at the same
 string the paste field already takes. Pasting the `otpauth://` URI is what a QR code encodes anyway.
 
-**Outstanding:** the creator has no list of their outstanding links. `ShareLink::toClientArray()` and
-the revoke route both exist and are tested; what is missing is a page that renders them, so a link
-can currently be withdrawn only by someone who can reach the endpoint. Worth doing before this is
-used in anger, and small.
+**Outstanding:** nothing from this phase's own list.
+
+`/account/links` lists every link the current user can withdraw, and its contents are derived from
+the same rule as the revoke ability rather than beside it — your own links, plus any issued into a
+vault you administer. That equivalence is the point: a policy that grants an owner power over an
+editor's link, without a page that shows it, grants a power only reachable by someone who already
+knows the identifier.
+
+The names on it are decrypted in the browser, because the server can say a link exists and when it
+expires but not what it points at. Where a name cannot be recovered the page distinguishes the two
+reasons — a secret since deleted, and a vault the user has been removed from — rather than showing a
+blank row.
 
 ---
 

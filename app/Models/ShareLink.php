@@ -36,6 +36,7 @@ use Illuminate\Support\Carbon;
  * @property int $view_count
  * @property ?Carbon $revoked_at
  * @property Carbon $created_at
+ * @property-read ?User $creator
  */
 class ShareLink extends Model
 {
@@ -124,16 +125,33 @@ class ShareLink extends Model
     }
 
     /**
-     * What the creator's own list shows. Never the token, which does not exist
-     * here, and never the payload, which would be pointless without the key.
+     * What the issuer's own list shows.
      *
-     * @return array{uuid: string, secretUuid: ?string, expiresAt: string, maxViews: int, viewCount: int, revokedAt: ?string, createdAt: string, redeemable: bool}
+     * Never the token, which does not exist here, and never the payload, which
+     * would be meaningless without a key the server has never held. Everything
+     * below is metadata the server already had to keep in order to count views
+     * and expire the row.
+     *
+     * The secret is identified by UUID only. Its *name* is inside `payload_ct`,
+     * so the page that renders this decrypts it in the browser — which is why
+     * `vaultUuid` is here: the client needs to know which Vault Key to unwrap
+     * before it can put a name to any of these.
+     *
+     * @return array{uuid: string, secretUuid: ?string, vaultUuid: ?string, createdBy: ?string, expiresAt: string, maxViews: int, viewCount: int, revokedAt: ?string, createdAt: string, redeemable: bool}
      */
     public function toClientArray(): array
     {
         return [
             'uuid' => $this->uuid,
             'secretUuid' => $this->secret?->uuid,
+            'vaultUuid' => $this->secret?->lockbox->vault->uuid,
+            /*
+             | A display name, as in the activity feed — this list is read by
+             | somebody deciding whether a link should still exist, and "who
+             | issued it" is most of that decision. Names are already plaintext
+             | on `users` and named as accepted leakage in docs/02.
+             */
+            'createdBy' => $this->creator?->display_name,
             'expiresAt' => $this->expires_at->toIso8601String(),
             'maxViews' => $this->max_views,
             'viewCount' => $this->view_count,

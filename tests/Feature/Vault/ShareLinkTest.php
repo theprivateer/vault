@@ -231,6 +231,171 @@ describe('opening a link', function () {
     });
 });
 
+describe('the list of outstanding links', function () {
+    /*
+     | The page exists because a power nobody can find is not a power. Its
+     | contents are derived from the same rule as the revoke ability, so there
+     | is no second source of truth about who sees what.
+     */
+    it('shows the links you issued, with what the server knows about each', function () {
+        ['owner' => $owner, 'secret' => $secret] = shareFixture();
+
+        $link = ShareLink::factory()->create([
+            'created_by' => $owner->getKey(),
+            'secret_id' => $secret->getKey(),
+            'max_views' => 3,
+            'view_count' => 1,
+        ]);
+
+        $this->actingAs($owner)
+            ->get('/account/links')
+            ->assertInertia(fn (AssertableInertia $page) => $page
+                ->component('share/Links')
+                ->has('links', 1)
+                ->where('links.0.uuid', $link->uuid)
+                ->where('links.0.secretUuid', $secret->uuid)
+                ->where('links.0.vaultUuid', $secret->lockbox->vault->uuid)
+                ->where('links.0.viewCount', 1)
+                ->where('links.0.maxViews', 3)
+                ->where('links.0.mine', true)
+                ->where('links.0.redeemable', true)
+                // Everything needed to put a name to the row, and nothing that
+                // would let the server do it.
+                ->has('secrets', 1)
+                ->has('vaults', 1)
+                ->has('vaults.0.membership.wrappedVaultKey')
+            );
+    });
+
+    /*
+     | The other half of the ability. An owner can withdraw an editor's link, so
+     | the owner has to be able to see it — otherwise the policy grants a power
+     | that can only be exercised by someone who already knows the identifier.
+     */
+    it('shows an owner the links others issued into their vault', function () {
+        ['owner' => $owner, 'vault' => $vault, 'secret' => $secret] = shareFixture();
+
+        $editor = User::factory()->create();
+        $vault->memberships()->create([
+            'uuid' => (string) Str::uuid7(),
+            'user_id' => $editor->getKey(),
+            'role' => VaultRole::Editor,
+            'wrapped_vault_key' => EnvelopeFixtures::sealedEnvelope(),
+            'key_epoch' => $vault->key_epoch,
+        ]);
+
+        ShareLink::factory()->create([
+            'created_by' => $editor->getKey(),
+            'secret_id' => $secret->getKey(),
+        ]);
+
+        $this->actingAs($owner)
+            ->get('/account/links')
+            ->assertInertia(fn (AssertableInertia $page) => $page
+                ->has('links', 1)
+                ->where('links.0.mine', false)
+                ->where('links.0.createdBy', $editor->display_name)
+            );
+    });
+
+    it('does not show an editor the links of a vault they merely write to', function () {
+        ['owner' => $owner, 'vault' => $vault, 'secret' => $secret] = shareFixture();
+
+        $editor = User::factory()->create();
+        $vault->memberships()->create([
+            'uuid' => (string) Str::uuid7(),
+            'user_id' => $editor->getKey(),
+            'role' => VaultRole::Editor,
+            'wrapped_vault_key' => EnvelopeFixtures::sealedEnvelope(),
+            'key_epoch' => $vault->key_epoch,
+        ]);
+
+        ShareLink::factory()->create([
+            'created_by' => $owner->getKey(),
+            'secret_id' => $secret->getKey(),
+        ]);
+
+        $this->actingAs($editor)->get('/account/links')->assertInertia(
+            fn (AssertableInertia $page) => $page->has('links', 0)
+        );
+    });
+
+    it('shows nothing of somebody else’s links', function () {
+        ['secret' => $secret] = shareFixture();
+
+        ShareLink::factory()->create(['secret_id' => $secret->getKey()]);
+
+        $this->actingAs(User::factory()->create())
+            ->get('/account/links')
+            ->assertInertia(fn (AssertableInertia $page) => $page->has('links', 0)->has('vaults', 0));
+    });
+
+    /*
+     | Finished links stay listed until the hourly sweep takes them. "This was
+     | opened twice and then expired" is most of why somebody opens this page.
+     */
+    it('keeps showing links that can no longer be opened', function () {
+        ['owner' => $owner, 'secret' => $secret] = shareFixture();
+
+        ShareLink::factory()->expired()->create([
+            'created_by' => $owner->getKey(),
+            'secret_id' => $secret->getKey(),
+        ]);
+
+        $this->actingAs($owner)
+            ->get('/account/links')
+            ->assertInertia(fn (AssertableInertia $page) => $page
+                ->has('links', 1)
+                ->where('links.0.redeemable', false)
+            );
+    });
+
+    /*
+     | A link outlives its secret, so the row has to survive having nothing to
+     | point at — and the page must be able to tell that apart from a vault it
+     | simply cannot read.
+     */
+    it('lists a link whose secret has been deleted, with nothing to name it', function () {
+        ['owner' => $owner, 'secret' => $secret] = shareFixture();
+
+        ShareLink::factory()->create([
+            'created_by' => $owner->getKey(),
+            'secret_id' => $secret->getKey(),
+        ]);
+
+        $secret->forceDelete();
+
+        $this->actingAs($owner)
+            ->get('/account/links')
+            ->assertInertia(fn (AssertableInertia $page) => $page
+                ->has('links', 1)
+                ->where('links.0.secretUuid', null)
+                ->where('links.0.vaultUuid', null)
+                ->has('vaults', 0)
+            );
+    });
+
+    it('never puts the token or the payload in the list', function () {
+        ['owner' => $owner, 'secret' => $secret] = shareFixture();
+
+        $link = ShareLink::factory()->create([
+            'created_by' => $owner->getKey(),
+            'secret_id' => $secret->getKey(),
+        ]);
+
+        $response = $this->actingAs($owner)->get('/account/links');
+
+        /*
+         | The page renders metadata, and a payload here would be a copy of the
+         | secret handed to a page that has no business with it — harmless while
+         | the key is elsewhere, and exactly the sort of thing that stops being
+         | harmless later.
+         */
+        expect($response->getContent())->not->toContain($link->token_hash)
+            ->and($response->getContent())->not->toContain($link->payload_ct->base64);
+    });
+});
+
 describe('withdrawing a link', function () {
     it('lets the creator end one early', function () {
         ['owner' => $owner, 'secret' => $secret] = shareFixture();

@@ -35,16 +35,29 @@ export interface LinkOptions {
     maxViews: number;
 }
 
-/** One row in the creator's list of outstanding links. */
+/**
+ * One row in the issuer's list of outstanding links.
+ *
+ * Metadata only. The secret's *name* is not here and could not be — it is inside
+ * `payload_ct`, so the page that renders this decrypts it with the Vault Key
+ * named by `vaultUuid`.
+ */
 export interface ShareLinkRecord {
     uuid: string;
+    /** Null once the secret it came from has been deleted; the link still works. */
     secretUuid: string | null;
+    /** Which Vault Key opens the secret, so a name can be put to the row. */
+    vaultUuid: string | null;
+    /** Display name of whoever issued it. */
+    createdBy: string | null;
     expiresAt: string;
     maxViews: number;
     viewCount: number;
     revokedAt: string | null;
     createdAt: string;
     redeemable: boolean;
+    /** Yours, or one you can withdraw because you administer its vault. */
+    mine: boolean;
 }
 
 /**
