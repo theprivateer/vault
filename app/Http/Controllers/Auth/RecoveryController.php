@@ -2,10 +2,12 @@
 
 namespace App\Http\Controllers\Auth;
 
+use App\Enums\AuditAction;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\UserKeyWrap;
 use App\Rules\Base64Bytes;
+use App\Support\AuditLog;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Config;
@@ -109,6 +111,14 @@ class RecoveryController extends Controller
         // definition forgotten. Consumed on first use.
         $request->session()->put('recovery.verified', true);
 
+        /*
+         | The single most important line this log will ever hold. Recovery is
+         | the one flow that grants a session without the password, so an entry
+         | nobody recognises is the strongest signal available that an account
+         | has been taken — and the user is shown it on their own activity page.
+         */
+        AuditLog::record(AuditAction::RecoveryUsed, $user, [], $user);
+
         return response()->json([
             'wrappedUserKey' => $wrap->wrapped_user_key->base64,
             'userKeyAad' => [
@@ -178,6 +188,8 @@ class RecoveryController extends Controller
             if ($viaRecovery) {
                 $user->forceFill(['recovery_used_at' => now()])->save();
             }
+
+            AuditLog::record(AuditAction::PasswordChanged, $user, [], $user);
         });
 
         return response()->json(['ok' => true]);
@@ -192,7 +204,11 @@ class RecoveryController extends Controller
             'recovery_auth_key' => ['required', 'string', Base64Bytes::exactly(32)],
         ]);
 
-        $this->storeRecoveryKit($request, $this->currentUser($request));
+        $user = $this->currentUser($request);
+
+        $this->storeRecoveryKit($request, $user);
+
+        AuditLog::record(AuditAction::RecoveryKitIssued, $user, [], $user);
 
         return response()->json(['ok' => true]);
     }

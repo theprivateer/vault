@@ -12,6 +12,7 @@
  * docs/02-threat-model.md.
  */
 import type { AadParams, ChunkAadParams } from '../aad';
+import type { AuditStatement } from '../audit';
 import type { Grant } from '../grant';
 import type { KdfParams } from '../primitives';
 
@@ -171,6 +172,17 @@ export type Request =
      | Worker will ever sign is one whose shape is known here.
      */
     | { op: 'signGrant'; grant: Grant }
+    /*
+     | Signs a statement about something only the browser saw — a vault
+     | unlocked, a secret revealed.
+     |
+     | The same discipline as signGrant, and for the same reason: it takes a
+     | *statement*, not bytes, and applies the audit domain separator itself.
+     | These two ops are together the complete list of things injected script
+     | can make this key say, which is why both take closed shapes rather than
+     | a buffer.
+     */
+    | { op: 'signAuditStatement'; statement: AuditStatement }
     | { op: 'forget'; handle: KeyHandle };
 
 export type ResponseFor<R extends Request['op']> = R extends 'status'
@@ -181,7 +193,7 @@ export type ResponseFor<R extends Request['op']> = R extends 'status'
         ? { results: BulkOpenResult[] }
         : R extends 'beginUnlock'
           ? { authKey: Uint8Array }
-          : R extends 'signGrant'
+          : R extends 'signGrant' | 'signAuditStatement'
             ? { payload: string; signature: Uint8Array }
             : Record<string, never>;
 

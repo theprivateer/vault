@@ -2,7 +2,9 @@
 
 namespace App\Http\Controllers\Auth;
 
+use App\Enums\AuditAction;
 use App\Http\Controllers\Controller;
+use App\Support\AuditLog;
 use App\Support\Totp;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -82,6 +84,8 @@ class TotpController extends Controller
 
         $request->session()->forget(self::PENDING_SECRET);
 
+        AuditLog::record(AuditAction::TotpEnabled, $user, [], $user);
+
         // Shown once. Only hashes are kept.
         return response()->json(['backupCodes' => $codes->all()]);
     }
@@ -94,6 +98,8 @@ class TotpController extends Controller
             $user->forceFill(['totp_secret_ct' => null, 'totp_confirmed_at' => null])->save();
             $user->backupCodes()->delete();
         });
+
+        AuditLog::record(AuditAction::TotpDisabled, $user, [], $user);
 
         return response()->json(['ok' => true]);
     }

@@ -111,4 +111,32 @@ return [
         'purge_after_days' => (int) env('VAULT_FILE_PURGE_DAYS', 30),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Audit Log
+    |--------------------------------------------------------------------------
+    |
+    | `anchor_address` is where the daily chain head is mailed. It is the only
+    | part of the audit design a compromised server cannot defeat — it can
+    | rewrite every row and recompute every hash, and it still cannot reach into
+    | yesterday's inbox. That only holds if the address is genuinely elsewhere;
+    | anchoring to a mailbox on the same box proves nothing.
+    |
+    | Empty by default, and `vault:audit-anchor` fails loudly rather than exiting
+    | quietly when it is unset. A job that reports success while doing nothing
+    | would leave the operator believing there is an external record.
+    |
+    */
+
+    'audit' => [
+        'anchor_address' => env('VAULT_AUDIT_ANCHOR_ADDRESS', ''),
+
+        /*
+         | How many events a vault's activity view shows. A cap rather than
+         | pagination for now: the view answers "what has happened here lately",
+         | and the full history is a database query for someone investigating.
+         */
+        'feed_limit' => (int) env('VAULT_AUDIT_FEED_LIMIT', 100),
+    ],
+
 ];

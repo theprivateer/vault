@@ -132,6 +132,9 @@ export function createHandler(keyring: Keyring = new Keyring()): Handler {
             case 'signGrant':
                 return keyring.signGrant(request.grant);
 
+            case 'signAuditStatement':
+                return keyring.signAuditStatement(request.statement);
+
             case 'forget':
                 keyring.forget(request.handle);
 

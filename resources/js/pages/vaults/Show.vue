@@ -177,7 +177,19 @@ function destroy(): void {
     <AppLayout>
         <Head :title="contents.vault?.payload?.name ?? 'Vault'" />
 
-        <Link href="/vaults" class="text-2xs text-muted hover:text-ink">&larr; all vaults</Link>
+        <div class="flex items-baseline justify-between gap-4">
+            <Link href="/vaults" class="text-2xs text-muted hover:text-ink">&larr; all vaults</Link>
+
+            <!--
+                Reachable from the vault itself rather than buried in settings.
+                The log is only useful if somebody looks at it, and the moment
+                they will want to is while they are standing in the vault
+                wondering whether something moved.
+            -->
+            <Link :href="`/vaults/${props.vault.uuid}/activity`" class="text-2xs text-muted hover:text-ink">
+                activity &rarr;
+            </Link>
+        </div>
 
         <!--
             A membership row is written by the server, so a vault appearing in

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\AuditAction;
 use App\Enums\VaultRole;
 use App\Http\Requests\StoreVaultRequest;
 use App\Http\Requests\UpdateItemRequest;
@@ -9,6 +10,7 @@ use App\Models\Lockbox;
 use App\Models\Secret;
 use App\Models\Vault;
 use App\Models\VaultMembership;
+use App\Support\AuditLog;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -128,6 +130,14 @@ class VaultController extends Controller
                 'granted_by' => $user->getKey(),
             ]);
 
+            /*
+             | Inside the transaction, so the vault and the record of its
+             | creation commit together. An audit entry written afterwards can
+             | be lost by a crash in between, and a log with holes in it that
+             | nobody can account for is worse than one that is merely thin.
+             */
+            AuditLog::record(AuditAction::VaultCreated, $vault, ['role' => VaultRole::Owner->value], $user);
+
             return $vault;
         });
 
@@ -143,6 +153,8 @@ class VaultController extends Controller
             'payload_version' => $request->integer('payload_version'),
         ]);
 
+        AuditLog::record(AuditAction::VaultUpdated, $vault);
+
         return back();
     }
 
@@ -155,6 +167,8 @@ class VaultController extends Controller
     {
 
         $vault->delete();
+
+        AuditLog::record(AuditAction::VaultDeleted, $vault);
 
         return to_route('vaults.index');
     }

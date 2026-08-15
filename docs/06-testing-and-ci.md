@@ -142,6 +142,32 @@ Tested in two places, deliberately, because they prove different things:
   fails to do anything, because the count the client loops on came out of the encrypted manifest,
   and that is a property of where a number is read from rather than of any check.
 
+### 3c. The audit chain, and what it cannot prove — Phase 7
+
+Four kinds of tampering, each caught by a different property, each with its own deliberate-corruption
+test in `tests/Feature/Vault/AuditChainTest.php`:
+
+| Tampering | What catches it |
+| --- | --- |
+| A field changed | the row's stored hash no longer equals the hash of its own contents |
+| A row deleted | `seq` jumps — which is why it is gapless rather than merely increasing |
+| Two rows reordered | the chain of `prev_hash` values, since nothing is missing and no count changed |
+| Rows removed from the end | **nothing in the chain.** What remains is a valid shorter chain |
+
+That last row is the interesting one, and it is why the table has a stored head and why the head is
+mailed out daily. The corruption tests write with the raw query builder rather than through the
+model, on purpose: `AuditEvent` refuses to be updated or deleted, and a test that only exercised
+that guard would prove something about application code rather than about the chain.
+
+**What none of it proves** is that the log was not written wholesale by a server that also holds
+every input to the hash. Only the signatures speak to that, so `AuditSignatureTest.php` includes the
+case the signing design exists for: an entry fabricated after the fact with every subsequent hash
+recomputed, so the chain verifies perfectly and only the signature gives it away.
+
+The metadata linter lives here too, in two forms — a structural assertion that every declared key is
+an allow-listed shape, and a canary that posts a sentinel through the real endpoints in every field
+a careless client might use and asserts it reaches no audit row.
+
 ### 4. Key material storage (SR7) — outstanding, Phase 11
 
 After unlock, assert `localStorage`, `sessionStorage`, IndexedDB and all cookies are free of key
@@ -168,8 +194,10 @@ should assert.
   403 — a 403 confirms the resource exists.
 - **Validation tests** proving the server accepts only blob shape and size, and that no code path
   parses a payload.
-- **Chain verification** (Phase 7) with deliberate corruption: modify a row, delete a row, reorder
-  two rows; each must be detected and the first divergent `seq` reported.
+- **Chain verification** with deliberate corruption: modify a row, delete a row, reorder two rows;
+  each must be detected and the first divergent `seq` reported. Plus the two the exit criteria did
+  not ask for — truncation from the end and a rewritten head — because neither is caught by the
+  chain itself ([3c above](#3c-the-audit-chain-and-what-it-cannot-prove--phase-7)).
 - **File tests** covering the parts of an attachment the server is responsible for: chunk
   idempotency, the quota counted in stored bytes rather than declared ones, refusal of an
   out-of-range index or an unrecognised algorithm byte, and the sweep that removes abandoned

@@ -41,7 +41,7 @@ opaque to the server; search happens in the browser.
 
 ## Status
 
-**Phases 0 to 6 complete.**
+**Phases 0 to 7 complete.**
 
 - **Phase 0** — Inertia v3 + Vue 3 + TypeScript strict, a strict nonce-based CSP enforced from
   the first render, Larastan at max level, and CI gating every check.
@@ -75,4 +75,11 @@ opaque to the server; search happens in the browser.
   and filenames that exist only inside the encrypted manifest. Capped at 100 MiB pending the
   [streaming download](05-implementation-plan.md#carried-forward-from-phase-6).
 
-Next: [Phase 7 — tamper-evident audit log](05-implementation-plan.md#phase-7--tamper-evident-audit-log).
+- **Phase 7** — the tamper-evident audit log: a BLAKE2b chain over every action, with `seq` gapless
+  under a row lock, append-only enforced three ways, and `vault:audit-verify` naming the first
+  entry that diverges. The two events the server cannot witness — a vault unlocked, a secret
+  revealed — are reported by the browser and **signed**, so the one thing a compromised server
+  could invent is the one thing it cannot. The chain head is mailed to the operator daily, because
+  a server that can recompute every hash still cannot reach yesterday's inbox.
+
+Next: [Phase 8 — version history & rollback](05-implementation-plan.md#phase-8--version-history--rollback).

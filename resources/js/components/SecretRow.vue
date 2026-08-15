@@ -17,8 +17,10 @@
 import { computed, nextTick, ref, useId } from 'vue';
 
 import NoticePanel from '@/components/NoticePanel.vue';
+import { reportReveal } from '@/lib/audit';
 import { copyForATime, CLIPBOARD_TTL_MS } from '@/lib/clipboard';
 import type { SecretPayload, SecretRecord } from '@/lib/items';
+import { useSession } from '@/stores/session';
 
 const props = defineProps<{
     record: SecretRecord;
@@ -29,6 +31,8 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{ edit: []; remove: [] }>();
+
+const { crypto } = useSession();
 
 const revealed = ref(false);
 const copied = ref(false);
@@ -67,6 +71,18 @@ async function reveal(): Promise<void> {
     confirming.value = false;
 
     if (revealed.value) {
+        /*
+         | The one thing the server cannot see, and the first question after any
+         | compromise: which credentials did that session actually look at? A
+         | page load fetches the whole vault's ciphertext whether one item is
+         | opened or none, so only this tab knows.
+         |
+         | Signed in the Worker and posted fire-and-forget. A failed report must
+         | never stop a reveal — the secret was revealed either way, and an
+         | error over a working feature teaches people to ignore errors.
+         */
+        reportReveal(crypto(), props.record.uuid);
+
         await nextTick();
         value.value?.focus();
     }

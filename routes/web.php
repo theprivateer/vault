@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\AuditEventController;
 use App\Http\Controllers\Auth\KdfParamsController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\Auth\RecoveryController;
@@ -66,10 +67,28 @@ Route::middleware('auth')->group(function (): void {
      | Found by the IDOR suite in tests/Feature/Vault/AuthorisationTest.php.
      */
     Route::get('/vaults', [VaultController::class, 'index'])->name('vaults.index');
+
+    /*
+     | Audit (Phase 7).
+     |
+     | The reporting endpoint accepts only the two actions the server cannot
+     | observe for itself, each carrying an Ed25519 signature over the exact
+     | bytes stored. Throttled because it is the one write path a page can call
+     | freely — a reveal is a click, and a log nobody can read because one
+     | session filled it is a log that has failed at its job.
+     */
+    Route::post('/audit', [AuditEventController::class, 'store'])
+        ->middleware('throttle:120,1')
+        ->name('audit.store');
+
+    Route::get('/account/activity', [AuditEventController::class, 'mine'])->name('audit.mine');
+
     Route::post('/vaults', [VaultController::class, 'store'])->name('vaults.store');
 
     Route::middleware('can:view,vault')->group(function (): void {
         Route::get('/vaults/{vault}', [VaultController::class, 'show'])->name('vaults.show');
+        Route::get('/vaults/{vault}/activity', [AuditEventController::class, 'vault'])
+            ->name('vaults.activity');
     });
 
     Route::middleware('can:update,vault')->group(function (): void {

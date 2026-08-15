@@ -2,11 +2,13 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\AuditAction;
 use App\Enums\VaultRole;
 use App\Http\Requests\StoreMembershipRequest;
 use App\Models\User;
 use App\Models\Vault;
 use App\Models\VaultMembership;
+use App\Support\AuditLog;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -59,7 +61,7 @@ class VaultMembershipController extends Controller
 
         // Through the relation, so `vault_id` is set by the relationship rather
         // than being mass-assignable on the model.
-        $vault->memberships()->updateOrCreate(
+        $membership = $vault->memberships()->updateOrCreate(
             ['user_id' => $recipient->getKey()],
             [
                 'uuid' => $request->string('membership_uuid')->toString(),
@@ -85,6 +87,17 @@ class VaultMembershipController extends Controller
             ],
         );
 
+        /*
+         | The subject is the membership, not the vault, because that is the
+         | thing that came into existence. The recipient is reachable from it;
+         | putting their handle in `metadata` would be a second, unindexed copy
+         | of a fact the row already holds.
+         */
+        AuditLog::record(AuditAction::MembershipGranted, $membership, [
+            'role' => $role->value,
+            'key_epoch' => $vault->key_epoch,
+        ]);
+
         return back();
     }
 
@@ -100,6 +113,10 @@ class VaultMembershipController extends Controller
     public function accept(VaultMembership $membership): RedirectResponse
     {
         $membership->forceFill(['accepted_at' => now()])->save();
+
+        AuditLog::record(AuditAction::MembershipAccepted, $membership, [
+            'role' => $membership->role->value,
+        ]);
 
         return back();
     }
@@ -122,6 +139,16 @@ class VaultMembershipController extends Controller
             $membership->forceFill(['revoked_at' => now()])->save();
 
             $membership->vault->forceFill(['rekey_required_at' => now()])->save();
+
+            /*
+             | Inside the transaction that revokes, so the two cannot come apart.
+             | A revocation that happened without a record of it is the exact
+             | shape of the thing this log exists to make impossible to do
+             | quietly.
+             */
+            AuditLog::record(AuditAction::MembershipRevoked, $membership, [
+                'previous_role' => $membership->role->value,
+            ]);
         });
 
         return back();

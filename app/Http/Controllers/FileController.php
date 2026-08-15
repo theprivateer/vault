@@ -2,9 +2,11 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\AuditAction;
 use App\Http\Requests\StoreFileRequest;
 use App\Models\Lockbox;
 use App\Models\VaultFile;
+use App\Support\AuditLog;
 use App\Support\ChunkBitmap;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -39,7 +41,7 @@ class FileController extends Controller
     {
         $chunkCount = $request->integer('chunk_count');
 
-        $lockbox->files()->create([
+        $file = $lockbox->files()->create([
             'uuid' => $request->string('uuid')->toString(),
             'payload_ct' => $request->string('payload_ct')->toString(),
             'wrapped_item_key' => $request->string('wrapped_item_key')->toString(),
@@ -51,6 +53,8 @@ class FileController extends Controller
             'ciphertext_size' => 0,
             'sort_order' => $request->integer('sort_order'),
         ]);
+
+        AuditLog::record(AuditAction::FileCreated, $file, ['chunk_count' => $chunkCount]);
 
         return back();
     }
@@ -83,6 +87,8 @@ class FileController extends Controller
      */
     public function destroy(VaultFile $file): RedirectResponse
     {
+        AuditLog::record(AuditAction::FileDeleted, $file, ['bytes' => $file->ciphertext_size]);
+
         $file->delete();
 
         return back();

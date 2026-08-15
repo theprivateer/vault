@@ -2,11 +2,13 @@
 
 namespace App\Http\Controllers\Auth;
 
+use App\Enums\AuditAction;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Auth\RegisterRequest;
 use App\Models\Invite;
 use App\Models\User;
 use App\Models\UserKeyWrap;
+use App\Support\AuditLog;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -78,6 +80,8 @@ class RegisterController extends Controller
             ]);
 
             $invite->forceFill(['accepted_at' => now()])->save();
+
+            AuditLog::record(AuditAction::Registered, $user, [], $user);
 
             return $user;
         });

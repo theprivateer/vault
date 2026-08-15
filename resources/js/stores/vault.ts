@@ -25,6 +25,7 @@
 import { computed, reactive, readonly, shallowRef, type Ref } from 'vue';
 
 import type { CryptoClient } from '@/crypto/worker/client';
+import { reportUnlock, resetReported } from '@/lib/audit';
 import { openAll, openVault, type Opened, type ProgressCallback } from '@/lib/decrypt';
 import type { FileManifest, FileRecord } from '@/lib/files';
 import type {
@@ -105,7 +106,17 @@ const cache = new Map<string, { payloadCt: string; opened: Opened<never, unknown
 let generation = 0;
 
 /** Synchronous, and registered once for the lifetime of the module. */
-onLock(() => wipe());
+onLock(() => {
+    wipe();
+
+    /*
+     | So the *next* unlock is reported too. Without this, locking and
+     | unlocking in one tab would record the first and silently skip every one
+     | after — which is exactly the sequence somebody investigating a session
+     | would want to see.
+     */
+    resetReported();
+});
 
 export function wipe(): void {
     generation++;
@@ -269,6 +280,14 @@ export async function openContents(client: CryptoClient, source: VaultSource): P
 
         state.vaultUuid = source.vault.uuid;
         state.contents = { vault, lockboxes, secrets, files: opened };
+
+        /*
+         | Reported here rather than at the unlock screen, because this is the
+         | moment the Vault Key actually opened something. An unlock that
+         | produced no readable content is not the event an investigation cares
+         | about. Fire-and-forget: a failed report must not fail a decrypt.
+         */
+        reportUnlock(client, source.vault.uuid);
         index.value = buildIndex(indexable(lockboxes, secrets));
         state.progress = { done: total, total };
     } finally {

@@ -89,7 +89,13 @@ The server necessarily learns:
 - **Graph shape** — how many vaults a user has, how many lockboxes per vault, how many secrets
   per lockbox, and which lockboxes link to which.
 - **Timestamps** — creation, modification and access times, to the second. Activity patterns are
-  visible: when you work, when you rotated something, when you panicked at 3am.
+  visible: when you work, when you rotated something, when you panicked at 3am. The audit log
+  (Phase 7) records this deliberately and in more detail — every action, its actor and its subject
+  — because being able to answer *what happened* is the main compensating control for a server that
+  cannot see *what is in* anything. What it never records is content: `audit_events.metadata` takes
+  only keys from a closed, declared set, none of which can differ between two users doing the same
+  thing to different data. Addresses are stored as `HMAC(APP_KEY, ip)` rather than in the clear:
+  correlatable, not reversible by whoever ends up with the database alone.
 - **Sizes** — which *bucket* a payload falls into, and exact file sizes. Payloads are padded to a
   bucket before encryption (powers of two to 4 KiB, then a 4 KiB stride), so the stored length no
   longer tracks the length of the secret: a 1-character password and a 12-character one are
@@ -143,12 +149,12 @@ evidence.
 | # | Requirement | Verified by |
 | --- | --- | --- |
 | SR1 | No plaintext secret material is ever written to the database, logs, cache, queue or object storage | `tests/Feature/Vault/LeakCanaryTest.php` — two sentinels, a vacuous-pass guard and a self-test |
-| SR2 | No key capable of decrypting user content exists on the server, in any form, at any time | `tests/Feature/NoServerDecryptionTest.php`, plus the CI grep gate over `app/` |
+| SR2 | No key capable of decrypting user content exists on the server, in any form, at any time | `tests/Feature/NoServerDecryptionTest.php`, run again as its own CI job |
 | SR3 | Tampering with any stored ciphertext produces a visible, specific error — never silent corruption or a null | `crypto/envelope.test.ts` — every single-bit mutation of a short envelope throws |
 | SR4 | A ciphertext cannot be moved between records or fields without detection | `crypto/aad.test.ts`, `crypto/keys.test.ts` |
 | SR5 | Every request is authorised against vault membership and role, independently of client claims | `tests/Feature/Vault/AuthorisationTest.php` (IDOR) and `RoleMatrixTest.php` (role × action) |
 | SR6 | Auth endpoints are rate limited per-IP and per-account, and do not reveal whether an account exists | `tests/Feature/Auth/LoginTest.php`, `RecoveryTest.php` — including the pre-auth salt endpoints |
 | SR7 | Key material never reaches `localStorage`, `sessionStorage`, IndexedDB or a cookie | **Not yet automated.** Holds by construction — nothing in `resources/js` calls any of those APIs — but construction is not a test. Needs the Phase 11 E2E suite |
-| SR8 | The audit log detects any insertion, deletion, reordering or modification of entries | **Not built** — Phase 7 |
+| SR8 | The audit log detects any insertion, deletion, reordering or modification of entries | `tests/Feature/Vault/AuditChainTest.php` — one deliberate-corruption case per kind, plus truncation from the end and a rewritten head, which the chain alone cannot catch. `AuditSignatureTest.php` covers a fabricated entry whose hashes were recomputed |
 | SR9 | Revoking a member rotates the Vault Key and re-wraps all item keys | `tests/Feature/Vault/RekeyTest.php`, `SharingTest.php` |
 | SR10 | The application sets a strict CSP with no `unsafe-inline` or `unsafe-eval` in `script-src` | `tests/Feature/SecurityHeadersTest.php`, asserted against real Vite output |

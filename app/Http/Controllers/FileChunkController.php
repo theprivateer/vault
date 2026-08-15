@@ -2,7 +2,9 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\AuditAction;
 use App\Models\VaultFile;
+use App\Support\AuditLog;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Config;
@@ -87,6 +89,19 @@ class FileChunkController extends Controller
                 'uploaded_at' => $updated->isComplete() ? now() : null,
             ])->save();
 
+            /*
+             | One event per *file*, not per chunk. A 100 MiB upload is a
+             | hundred requests, and a hundred near-identical rows would bury
+             | everything around them — a log nobody can read is a log nobody
+             | reads. The interesting moment is when the file became whole.
+             */
+            if ($updated->isComplete()) {
+                AuditLog::record(AuditAction::FileUploaded, $locked, [
+                    'chunk_count' => $locked->chunk_count,
+                    'bytes' => $locked->ciphertext_size,
+                ]);
+            }
+
             return true;
         });
 
@@ -122,6 +137,15 @@ class FileChunkController extends Controller
         $path = $file->chunkPath($index);
 
         abort_unless($file->disk()->exists($path), 404);
+
+        /*
+         | Recorded per chunk, unlike the upload — because a download is the
+         | side of this that matters after a compromise, and a partial download
+         | is exactly the thing worth being able to see. `chunk_index` makes a
+         | reader able to tell somebody who opened a file from somebody who
+         | pulled every byte of it.
+         */
+        AuditLog::record(AuditAction::FileDownloaded, $file, ['chunk_index' => $index]);
 
         return response($file->disk()->get($path), 200, [
             'Content-Type' => 'application/octet-stream',

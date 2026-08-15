@@ -14,6 +14,7 @@ import {
     MalformedEnvelopeError,
     WorkerUnavailableError,
 } from '../errors';
+import type { AuditStatement, SignedStatement } from '../audit';
 import type { Grant, SignedGrant } from '../grant';
 import type { RegistrationResult } from './keyring';
 import type { BulkOpenItem, BulkOpenResult, KeyHandle, Reply, Request, SerialisedError } from './protocol';
@@ -304,6 +305,18 @@ export class CryptoClient {
      */
     async signGrant(grant: Grant): Promise<SignedGrant> {
         return this.send<SignedGrant>({ op: 'signGrant', grant });
+    }
+
+    /**
+     * Signs a statement about something only this tab observed.
+     *
+     * The payload comes back rather than being rebuilt by the caller, for the
+     * reason `signGrant` returns one: it is what gets stored, a signature
+     * verifies against those bytes and no others, and re-serialising them
+     * anywhere else is a chance for the two to drift apart.
+     */
+    async signAuditStatement(statement: AuditStatement): Promise<SignedStatement> {
+        return this.send<SignedStatement>({ op: 'signAuditStatement', statement });
     }
 
     async forget(handle: KeyHandle): Promise<void> {

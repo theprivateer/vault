@@ -397,6 +397,32 @@ see.
 `vault:audit-verify` passes on a populated database, and detects a modified row, a deleted row and
 a reordered row in three separate deliberate-corruption tests. Signatures verify.
 
+### Carried forward from Phase 7
+
+All eight tasks are built and every exit criterion has a passing test in
+`tests/Feature/Vault/AuditChainTest.php` — plus two the criteria did not ask for: a chain truncated
+from the *end*, and a rewritten head. Both matter, because neither is caught by the hash chain
+itself. Signature behaviour is in `AuditSignatureTest.php`, including the case the whole signing
+design exists for: an entry the server fabricated afterwards, with every hash recomputed so the
+chain verifies perfectly and only the signature gives it away.
+
+Three departures from what this plan and docs/03 originally specified, each with its reason
+recorded where it is implemented:
+
+- **The canonical form is NUL-joined fields, not `canonical_json`.** JSON has flags and encoders;
+  a hash computed years earlier must not depend on any of them.
+- **`seq` is allocated under a lock on a one-row `audit_chain` table**, not on the last event.
+  Locking the last event is racy for inserts.
+- **Only two actions are client-signed** — `vault.unlocked` and `secret.revealed` — rather than
+  "grants, revocations, rotations". Those three are server-observed; taking the client's word for
+  something the server watched happen adds nothing and widens a signing oracle.
+
+**Outstanding:** the production `REVOKE UPDATE, DELETE` is documented in the migration and in
+docs/04 but is not applied by anything here — it belongs to the deployment work in Phase 12, and
+until then the append-only guarantee rests on the two layers that are code. Anchoring needs
+`VAULT_AUDIT_ANCHOR_ADDRESS` set to an address the server does not administer, or it is not an
+anchor; the command fails loudly rather than pretending otherwise.
+
 ---
 
 ## Phase 8 — Version history & rollback

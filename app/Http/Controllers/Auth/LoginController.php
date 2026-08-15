@@ -2,9 +2,11 @@
 
 namespace App\Http\Controllers\Auth;
 
+use App\Enums\AuditAction;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Auth\LoginRequest;
 use App\Models\User;
+use App\Support\AuditLog;
 use App\Support\Totp;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -56,6 +58,15 @@ class LoginController extends Controller
             RateLimiter::hit($this->ipKey($request));
             RateLimiter::hit($this->accountKey($email));
 
+            /*
+             | Recorded with no actor when the address belongs to nobody, and
+             | with one when it does. The email itself is deliberately absent:
+             | an audit log full of attempted addresses would be a list of who
+             | has an account here, assembled by whoever was guessing. The
+             | `ip_hash` is what correlates a sweep.
+             */
+            AuditLog::record(AuditAction::LoginFailed, $user, [], $user);
+
             throw ValidationException::withMessages([
                 'email' => 'Those credentials do not match our records.',
             ]);
@@ -69,6 +80,13 @@ class LoginController extends Controller
 
         $user->forceFill(['last_login_at' => now()])->save();
 
+        AuditLog::record(
+            AuditAction::LoggedIn,
+            $user,
+            ['second_factor' => $user->hasTotpEnabled()],
+            $user,
+        );
+
         return response()->json([
             'redirect' => route('vaults.index'),
             'bundle' => $user->unlockBundle(),
@@ -77,6 +95,9 @@ class LoginController extends Controller
 
     public function destroy(Request $request): RedirectResponse
     {
+        // Before the logout, while there is still a user to attribute it to.
+        AuditLog::record(AuditAction::LoggedOut, $request->user());
+
         auth()->logout();
 
         $request->session()->invalidate();

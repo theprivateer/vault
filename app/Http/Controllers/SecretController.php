@@ -2,10 +2,12 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\AuditAction;
 use App\Http\Requests\StoreSecretRequest;
 use App\Http\Requests\UpdateSecretRequest;
 use App\Models\Lockbox;
 use App\Models\Secret;
+use App\Support\AuditLog;
 use App\Support\Ciphertext;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Validation\ValidationException;
@@ -22,7 +24,7 @@ class SecretController extends Controller
     public function store(StoreSecretRequest $request, Lockbox $lockbox): RedirectResponse
     {
 
-        $lockbox->secrets()->create([
+        $secret = $lockbox->secrets()->create([
             'uuid' => $request->string('uuid')->toString(),
             'payload_ct' => $request->string('payload_ct')->toString(),
             'wrapped_item_key' => $request->string('wrapped_item_key')->toString(),
@@ -31,6 +33,8 @@ class SecretController extends Controller
             'sort_order' => $request->integer('sort_order'),
             'linked_lockbox_id' => $this->linkedLockboxId($request, $lockbox),
         ]);
+
+        AuditLog::record(AuditAction::SecretCreated, $secret);
 
         return back();
     }
@@ -88,6 +92,8 @@ class SecretController extends Controller
             ]);
         }
 
+        AuditLog::record(AuditAction::SecretUpdated, $secret, ['version' => $expected + 1]);
+
         return back();
     }
 
@@ -95,6 +101,8 @@ class SecretController extends Controller
     {
 
         $secret->delete();
+
+        AuditLog::record(AuditAction::SecretDeleted, $secret);
 
         return back();
     }

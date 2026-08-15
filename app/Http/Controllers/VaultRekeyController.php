@@ -2,11 +2,13 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\AuditAction;
 use App\Http\Requests\RekeyVaultRequest;
 use App\Models\Lockbox;
 use App\Models\Secret;
 use App\Models\Vault;
 use App\Models\VaultMembership;
+use App\Support\AuditLog;
 use App\Support\Ciphertext;
 use App\Support\ItemKey;
 use Illuminate\Database\Eloquent\Collection;
@@ -129,6 +131,18 @@ class VaultRekeyController extends Controller
                 'key_epoch' => $request->integer('key_epoch'),
                 'rekey_required_at' => null,
             ])->save();
+
+            /*
+             | The count is what makes a partial re-key visible after the fact.
+             | The request is all-or-nothing and this transaction enforces that,
+             | but the log is read by someone who was not here at the time, and
+             | "rotated the key" without a number leaves them unable to tell a
+             | complete rotation from one that covered two items.
+             */
+            AuditLog::record(AuditAction::VaultRekeyed, $locked, [
+                'key_epoch' => $request->integer('key_epoch'),
+                'rewrapped' => count($items) + $liveMemberships->count(),
+            ]);
         });
 
         return to_route('vaults.show', $vault);

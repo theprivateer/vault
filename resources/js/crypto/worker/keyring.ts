@@ -5,6 +5,8 @@
  * glue stays trivial and this logic can be exercised directly.
  */
 import type { AadContext, AadParams } from '../aad';
+import type { AuditStatement, SignedStatement } from '../audit';
+import { signAuditStatement } from '../audit';
 import { openChunk, sealChunk } from '../chunks';
 import { open, seal } from '../envelope';
 import { InvalidParameterError, KeyUnavailableError, MalformedEnvelopeError } from '../errors';
@@ -413,6 +415,19 @@ export class Keyring {
      */
     signGrant(grant: Grant): SignedGrant {
         return signGrant(this.require(ED25519_KEY), grant);
+    }
+
+    /**
+     * Signs an audit statement with the held Ed25519 key.
+     *
+     * Takes a statement rather than bytes, exactly as `signGrant` takes a grant.
+     * Between them these two operations are everything this key will ever sign
+     * on request, and both are shapes rather than buffers so that the set stays
+     * enumerable — a general signing operation would hand injected script the
+     * user's signature on whatever the format grows to cover.
+     */
+    signAuditStatement(statement: AuditStatement): SignedStatement {
+        return signAuditStatement(this.require(ED25519_KEY), statement);
     }
 
     seal(handle: KeyHandle, plaintext: Uint8Array, aad: AadParams): Uint8Array {

@@ -2,7 +2,9 @@
 
 namespace App\Console\Commands;
 
+use App\Enums\AuditAction;
 use App\Models\VaultFile;
+use App\Support\AuditLog;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Config;
 
@@ -79,6 +81,17 @@ class PruneFiles extends Command
         if ($dryRun) {
             return;
         }
+
+        /*
+         | Recorded before the row goes, because the row is the only thing that
+         | knows the file existed. Recorded with no actor, because there was no
+         | human: a sweep that attributed itself to whoever last touched the
+         | file would be putting a false name against a deletion.
+         */
+        AuditLog::record(AuditAction::FilePruned, $file, [
+            'reason' => $reason === 'purged' ? 'purged' : 'orphan',
+            'bytes' => $file->ciphertext_size,
+        ], actor: null);
 
         $file->disk()->deleteDirectory($file->storageDirectory());
         $file->forceDelete();

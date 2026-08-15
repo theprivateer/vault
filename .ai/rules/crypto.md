@@ -4,6 +4,7 @@ paths:
   - resources/js/crypto/padding.ts
   - resources/js/crypto/grant.ts
   - resources/js/crypto/chunks.ts
+  - resources/js/crypto/audit.ts
 ---
 
 # Crypto
@@ -41,3 +42,14 @@ The nonce is `noncePrefix(8 random, per file) ‖ index(4 BE)`, not random. GCM'
 Every chunk's AAD binds its index AND its file's chunk count. The count is what makes truncation fail the tag — with only the index, dropping the last chunk leaves every remaining one verifying. Both numbers must come from the encrypted manifest, never from the server's row.
 
 A resume re-encrypts a chunk at a nonce it already used. That is safe only if the bytes are identical, so lib/files.ts verifies the source against the manifest's SHA-256 before sending anything. Never relax that check.
+
+## The Worker signs statements, never bytes — and the vocabulary is the oracle
+`AUDIT_ACTIONS` is closed for the same reason `signGrant` takes a grant rather than a buffer: these are signing oracles, and the set is the complete list of things injected script can make the user's Ed25519 key say. Adding an action widens that. Never add a general "sign these bytes" op.
+
+Only events the server cannot witness belong here — currently `vault.unlocked` and `secret.revealed`. Anything the server observed needs no signature and gains nothing from one.
+
+Domain separator `vault:audit:v1`, distinct from `vault:grant:v1`. Both are Ed25519 signatures by one key; without separation a signature over one could be presented as the other, and a grant is a statement about access.
+
+`signed_payload` is stored verbatim and `parse` must never re-canonicalise and compare — that would invalidate every signature the day the format changes. Safety comes from the version check plus comparing the signed fields against the event being recorded.
+
+Reporting is fire-and-forget and swallows failures on purpose (`lib/audit.ts`). A secret that was revealed was revealed; a failed report does not un-reveal it, and an error over a working feature teaches people to ignore errors.

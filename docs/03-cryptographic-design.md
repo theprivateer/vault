@@ -520,24 +520,61 @@ Caveats to state in the UI: anyone with the link can read it once; the link will
 recipient's browser history and possibly their chat client's link preview fetcher, which may burn
 the single view. Offer a view count above one for that reason.
 
-### Audit chain (D9, Phase 7)
-
-*Specified, not yet built.*
+### Audit chain (D9)
 
 ```
-entry.hash = BLAKE2b-256( prev_hash ‖ canonical_json({seq, actor, action, subject, meta, at}) )
+entry.hash = BLAKE2b-256( prev_hash ‖ canonical(entry) )
+
+canonical(entry) = "vault.audit.v1" ‖ 0x00 ‖ seq ‖ 0x00 ‖ at ‖ 0x00 ‖ actor ‖ 0x00 ‖ action
+                   ‖ 0x00 ‖ subjectType ‖ 0x00 ‖ subjectUuid ‖ 0x00 ‖ metadata
+                   ‖ 0x00 ‖ signature ‖ 0x00 ‖ signedPayload ‖ 0x00 ‖ ipHash ‖ 0x00 ‖ uaHash
 ```
 
-`seq` is a gapless integer, allocated under a row lock. Genesis entry has `prev_hash` = 32 zero
-bytes. An artisan command walks the chain and reports the first divergent `seq`. Insertion,
-deletion, reordering and modification all break it.
+**NUL-joined fields, not `canonical_json` as this document first specified.** JSON has encoder
+flags, escaping choices and key ordering, and every one of them is a way for a future PHP upgrade
+or a stray flag to change the bytes of a hash computed years earlier — a failure with no recovery,
+because the whole log would then report as tampered. The NUL join has nothing to drift, and it is
+the construction `crypto/aad.ts` already uses for the binding this project depends on most. It is
+injective because no field can contain a NUL: the action is a closed enum, identifiers are UUIDs,
+the hashes are base64, and `metadata` is JSON, which escapes a NUL rather than emitting one.
 
-The server writes entries, so a compromised server can rewrite the whole chain. Two hardenings:
+`metadata` is hashed **exactly as stored**, never decoded and re-encoded, which is why its column
+is `text` rather than `json` — the same trap as `grant_payload` and `jsonb`.
 
-- Client-originated events (grants, revocations, rotations) carry an **Ed25519 signature from the
-  acting user's key**, which the server cannot forge.
-- The chain head is periodically anchored outside the database — emailed to the operator daily,
-  or appended to an external append-only log. A rewritten chain then contradicts an anchor.
+`seq` is a gapless integer, allocated under a row lock on a single-row `audit_chain` table. Locking
+the *last event* instead is racy for inserts: a blocked transaction rechecks the row it waited on
+rather than the new maximum, so two writers compute the same next sequence. Genesis has `prev_hash`
+= 32 zero bytes. `php artisan vault:audit-verify` walks the chain and reports the first divergent
+`seq`. Insertion, deletion, reordering and modification all break it.
+
+**Truncation from the end does not break it**, and that is worth stating plainly: what remains is a
+perfectly valid shorter chain. The stored head catches it, and the daily anchor catches a head that
+was rewritten too.
+
+The server writes entries, so a compromised server can rewrite the whole chain and recompute every
+hash after the change. The chain alone stops careless tampering, not deliberate tampering. Two
+hardenings, both real and neither a solution:
+
+- **Client-originated events carry an Ed25519 signature from the acting user's key**, which the
+  server cannot forge. Two actions qualify — `vault.unlocked` and `secret.revealed` — because they
+  are the only two the server does not witness for itself. The set is closed for the same reason
+  `signGrant` takes a grant rather than bytes: it is a signing oracle, and its vocabulary is the
+  complete list of things injected script can make that key say.
+
+  ```
+  signature = Ed25519( "vault:audit:v1" ‖ 0x00 ‖ payload )
+  payload   = {"v":1,"action":…,"subjectUuid":…,"at":…}   // stored verbatim
+  ```
+
+  Domain-separated from `vault:grant:v1`, since both are signatures by one key. The payload is
+  stored exactly as signed, so a future change to the format cannot invalidate signatures already
+  issued — the same rule as `grant_payload`.
+
+- **The chain head is anchored outside the database**, emailed to the operator daily by
+  `vault:audit-anchor`. This is the only part a compromised server cannot defeat: it can rewrite
+  every row and recompute every hash, and it cannot reach into yesterday's inbox. Its strength
+  comes entirely from the anchor being *elsewhere* — an address the same server administers proves
+  nothing.
 
 ## Key handling in memory
 

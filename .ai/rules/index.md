@@ -6,7 +6,7 @@ Before planning or editing, find the row whose globs match the file's path and r
 | --- | --- |
 | app/** | .ai/rules/app.md |
 | app/Http/Controllers/SecretController.php, app/Http/Controllers/VaultRekeyController.php, app/Http/Controllers/FileChunkController.php | .ai/rules/controllers.md |
-| resources/js/crypto/**, resources/js/crypto/padding.ts, resources/js/crypto/grant.ts, resources/js/crypto/chunks.ts | .ai/rules/crypto.md |
+| resources/js/crypto/**, resources/js/crypto/padding.ts, resources/js/crypto/grant.ts, resources/js/crypto/chunks.ts, resources/js/crypto/audit.ts | .ai/rules/crypto.md |
 | docs/** | .ai/rules/docs.md |
 | resources/js/** | .ai/rules/js.md |
 | resources/js/lib/**, resources/js/lib/sharing.ts, resources/js/lib/files.ts | .ai/rules/lib.md |
@@ -17,4 +17,5 @@ Before planning or editing, find the row whose globs match the file's path and r
 | app/Policies/** | .ai/rules/policies.md |
 | routes/** | .ai/rules/routes.md |
 | resources/js/stores/**, resources/js/stores/lock.ts | .ai/rules/stores.md |
+| app/Support/AuditLog.php | .ai/rules/support.md |
 | resources/js/crypto/worker/** | .ai/rules/worker.md |

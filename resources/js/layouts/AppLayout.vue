@@ -71,6 +71,7 @@ function signOutNow(): void {
                         {{ page.props.auth.user.handle }}
                     </span>
 
+                    <Link href="/account/activity" class="text-muted hover:text-ink">activity</Link>
                     <Link href="/account/two-factor" class="text-muted hover:text-ink">account</Link>
 
                     <button

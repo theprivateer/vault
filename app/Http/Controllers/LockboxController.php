@@ -2,12 +2,14 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\AuditAction;
 use App\Http\Requests\StoreLockboxRequest;
 use App\Http\Requests\UpdateItemRequest;
 use App\Models\Lockbox;
 use App\Models\Secret;
 use App\Models\Vault;
 use App\Models\VaultFile;
+use App\Support\AuditLog;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -85,13 +87,15 @@ class LockboxController extends Controller
     public function store(StoreLockboxRequest $request, Vault $vault): RedirectResponse
     {
 
-        $vault->lockboxes()->create([
+        $lockbox = $vault->lockboxes()->create([
             'uuid' => $request->string('uuid')->toString(),
             'payload_ct' => $request->string('payload_ct')->toString(),
             'wrapped_item_key' => $request->string('wrapped_item_key')->toString(),
             'payload_version' => $request->integer('payload_version'),
             'sort_order' => $request->integer('sort_order'),
         ]);
+
+        AuditLog::record(AuditAction::LockboxCreated, $lockbox);
 
         return back();
     }
@@ -105,13 +109,23 @@ class LockboxController extends Controller
             'payload_version' => $request->integer('payload_version'),
         ]);
 
+        AuditLog::record(AuditAction::LockboxUpdated, $lockbox);
+
         return back();
     }
 
     public function destroy(Lockbox $lockbox): RedirectResponse
     {
+        /*
+         | The count is recorded because deleting a lockbox takes its secrets
+         | with it, and "deleted a lockbox" alone understates that. A count is
+         | structural; the names of what went are not, and do not appear.
+         */
+        $count = $lockbox->secrets()->count();
 
         $lockbox->delete();
+
+        AuditLog::record(AuditAction::LockboxDeleted, $lockbox, ['count' => $count]);
 
         return to_route('vaults.show', $lockbox->vault);
     }

@@ -31,11 +31,12 @@ users ──1:N── user_key_wraps          (password / recovery / [prf] wrapp
                                                   ├──1:N── secrets ──1:N── secret_versions ·
                                                   └──1:N── files
 
-audit_events   (hash-chained, standalone) ·
+audit_events   (hash-chained, standalone)
+audit_chain    (one row: the chain tip)
 share_links    (one-time, standalone) ·
 ```
 
-Tables marked `·` are specified here but **not yet migrated** — they belong to phases 7 to 9. The
+Tables marked `·` are specified here but **not yet migrated** — they belong to phases 8 and 9. The
 TOTP seed itself lives on `users` rather than in a table of its own; there was no second column
 worth the join.
 
@@ -306,26 +307,63 @@ model. Filename, type and hash are all in the payload; 2017 stored `original_nam
 and `extension` as plaintext columns and wrote the upload to disk under a name derived from the
 original, so a directory listing was a table of contents.
 
-### `audit_events` (Phase 7)
+### `audit_chain`
+
+One row, forever: `seq` and `head_hash`, the tip of the chain.
+
+It exists so that allocating `seq` has something to lock. Locking the last *event* instead is racy
+for inserts — a blocked transaction rechecks the row it waited on rather than the new maximum, so
+two writers compute the same next sequence — and it makes reading the head an index scan rather
+than a lookup. The unique index on `audit_events.seq` is the backstop underneath: if the lock is
+ever bypassed, the second insert fails loudly instead of forking the chain.
+
+It is also what notices a chain truncated from the *end*, which nothing else can: what remains
+after a truncation is a perfectly valid shorter chain.
+
+### `audit_events`
 
 | Column | Type | Notes |
 | --- | --- | --- |
 | `id` | bigint PK | |
-| `seq` | bigint unique | gapless, allocated under a row lock |
+| `seq` | bigint unique | gapless, allocated under the `audit_chain` row lock |
 | `prev_hash` | binary(32) | genesis = 32 zero bytes |
-| `hash` | binary(32) | `BLAKE2b(prev_hash ‖ canonical_json(entry))` |
-| `actor_id` | FK null | null for system events |
-| `action` | string | `vault.unlocked`, `secret.viewed`, `membership.granted`, … |
-| `subject_type`, `subject_uuid` | | polymorphic |
-| `metadata` | jsonb | **structural only** — never payload content |
+| `hash` | binary(32) | `BLAKE2b(prev_hash ‖ canonical(entry))` — [03 § Audit chain](03-cryptographic-design.md#audit-chain-d9) |
+| `actor_uuid` | uuid null | **not a foreign key**; null for system events |
+| `action` | string | `vault.unlocked`, `secret.revealed`, `membership.granted`, … |
+| `subject_type`, `subject_uuid` | | polymorphic, by UUID |
+| `metadata` | text | canonical JSON, **structural only** — never payload content |
 | `actor_signature` | binary(64) null | Ed25519, for client-originated events |
-| `ip_hash` | binary(32) | `HMAC(APP_KEY, ip)` — correlatable, not a stored address |
-| `user_agent_hash` | binary(32) | |
-| `created_at` | timestamp | |
+| `signed_payload` | text null | the exact bytes that were signed |
+| `ip_hash` | binary(32) null | `HMAC(APP_KEY, ip)` — correlatable, not a stored address |
+| `user_agent_hash` | binary(32) null | |
+| `created_at` | timestamp | second precision; settled before the hash is computed |
 
-Append-only: no `updated_at`, no update route, and a database-level revoke of `UPDATE`/`DELETE`
-for the application role in production. A `metadata` linter test asserts no key ever holds
-decrypted content — the obvious way this table quietly becomes a plaintext leak.
+**`actor_uuid` is not a foreign key, and that is the point.** A nullable FK with `nullOnDelete`
+would mean closing an account silently rewrites every row that account ever touched — which changes
+the bytes those rows were hashed over and breaks the chain from the earliest of them. The log would
+then report tampering because somebody left. `subject_uuid` is polymorphic by UUID for the same
+reason: the record of what happened to a thing has to outlive the thing.
+
+**`metadata` is `text` holding canonical JSON, not `json` or `jsonb`.** The chain hashes those bytes
+exactly as stored; a column type that reordered keys or normalised whitespace would invalidate every
+hash from that row on. Identical trap to `vault_memberships.grant_payload`. Keys are sorted before
+encoding, so the same facts always produce the same bytes.
+
+**The keys are a closed set** (`App\Support\AuditMetadata`), each declaring the shape it holds. This
+is the guard on the most likely way this project leaks plaintext: everywhere else a value reaching
+the server is already ciphertext, and here there is a free-form JSON column beside a controller with
+the whole request in scope. The rule for admission — *could this value differ between two users who
+did the same thing to different data?* A role, an epoch, a count and a chunk index cannot. A name, a
+note, a filename or a URL can, and none is admissible.
+
+Append-only: no `updated_at`, no update route, a model that throws on update or delete, and a
+database-level revoke for the application role in production:
+
+```sql
+REVOKE UPDATE, DELETE ON audit_events FROM vault_app;
+```
+
+Three layers because the first two are code, and code is changed by whoever is changing the code.
 
 ### `share_links` (Phase 9)
 
