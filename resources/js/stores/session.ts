@@ -60,6 +60,28 @@ let client: CryptoClient | null = null;
 let idleTimer: ReturnType<typeof setTimeout> | null = null;
 let detach: (() => void) | null = null;
 
+/**
+ * Anything holding decrypted data, to be told the moment it stops being
+ * allowed to.
+ *
+ * Deliberately a synchronous callback list rather than a watcher on the
+ * reactive status. A Vue watcher fires on the next tick, and "the plaintext is
+ * gone" must not be true one tick after the user asked for it — between those
+ * two moments a screenshot, a devtools snapshot or a render still has the
+ * secrets in it. Locking calls these before it returns.
+ */
+const lockListeners = new Set<() => void>();
+
+/**
+ * Registers a listener to be called synchronously on every lock. Returns a
+ * function that removes it.
+ */
+export function onLock(listener: () => void): () => void {
+    lockListeners.add(listener);
+
+    return () => lockListeners.delete(listener);
+}
+
 /** Test seam: lets a suite supply a client that does not spawn a real Worker. */
 let createClient: () => CryptoClient = () => new CryptoClient();
 
@@ -165,6 +187,15 @@ export function lock(reason: LockReason = 'manual'): void {
     client?.terminate();
     client = null;
 
+    /*
+     | Before the status changes, so nothing can observe a store that still
+     | holds plaintext while the interface already says "locked" — and before
+     | this function returns, so `lock()` really does mean it.
+     */
+    for (const listener of lockListeners) {
+        listener();
+    }
+
     if (state.status !== 'anonymous') {
         state.status = 'locked';
     }
@@ -223,6 +254,11 @@ export function resetSession(): void {
     clearIdleTimer();
     client?.terminate();
     client = null;
+
+    for (const listener of lockListeners) {
+        listener();
+    }
+
     state.status = 'anonymous';
     state.lockReason = null;
     state.unlocking = false;

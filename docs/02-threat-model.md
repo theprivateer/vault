@@ -88,9 +88,13 @@ The server necessarily learns:
   per lockbox, and which lockboxes link to which.
 - **Timestamps** — creation, modification and access times, to the second. Activity patterns are
   visible: when you work, when you rotated something, when you panicked at 3am.
-- **Sizes** — payload ciphertext length within AEAD overhead, and exact file sizes. A 2 KiB
-  payload is a note; a 60-byte one is a password. Payloads are padded to a bucket size
-  (Phase 4) to blunt this; files are not padded, and their sizes leak.
+- **Sizes** — which *bucket* a payload falls into, and exact file sizes. Payloads are padded to a
+  bucket before encryption (powers of two to 4 KiB, then a 4 KiB stride), so the stored length no
+  longer tracks the length of the secret: a 1-character password and a 12-character one are
+  stored at identical size. What remains is the bucket, so a 3 KiB note is still visibly larger
+  than a credential. Padding to one fixed size would close it completely and would make every
+  password cost as much to store as a document; the buckets are the compromise. Files are not
+  padded, and their sizes leak.
 - **Membership** — who shares a vault with whom, and when access was granted or revoked. This is
   social-graph information and it is not hidden.
 - **Access patterns** — which item was fetched and when, from the request log and audit log.

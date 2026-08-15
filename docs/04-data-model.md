@@ -171,8 +171,20 @@ The 2017 `control` boolean is gone; that concept was removed by its own migratio
 | `wrapped_item_key`, `payload_version` | | |
 | `linked_lockbox_id` | FK null | the 2017 lockbox-as-a-value feature, kept |
 | `sort_order` | int | |
-| `current_version` | int | mirrors `secret_versions` |
+| `current_version` | int | optimistic-concurrency token; mirrors `secret_versions` |
 | `timestamps`, `deleted_at` | | |
+
+**`current_version` is also the concurrency token.** An update must carry the version the client
+had when it composed the write, and the comparison happens inside the `where` clause of the update
+statement rather than as a read followed by a write — a read-then-write leaves a window in which
+the other writer commits, which on a concurrent edit is exactly when it matters. The server cannot
+merge two versions of a secret: they are ciphertext under different item keys, and merging would
+mean reading them. So the only options are to refuse or to lose one silently, and a password that
+vanishes without anyone being told is discovered months later at the worst possible moment.
+
+The refusal is a validation error rather than HTTP 409. Inertia reserves 409 for its own
+asset-version protocol and answers one with a hard page reload, which would throw the user's
+unsaved edit away while telling them nothing.
 
 **The type is inside the payload.** A `type` enum column would tell the server which secrets are
 TOTP seeds, which are SSH keys and which are notes — a meaningful targeting signal for free.

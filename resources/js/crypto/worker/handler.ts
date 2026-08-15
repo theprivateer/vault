@@ -71,6 +71,24 @@ export function createHandler(keyring: Keyring = new Keyring()): Handler {
             case 'open':
                 return { bytes: keyring.open(request.handle, request.envelope, request.aad) };
 
+            case 'openMany':
+                /*
+                 | Failures are caught per item and returned rather than
+                 | thrown, so a batch reports exactly what a sequence of single
+                 | opens would have. If one bad row could reject the request,
+                 | the number of readable secrets on a page would depend on
+                 | which batch the bad one landed in.
+                 */
+                return {
+                    results: request.items.map((item) => {
+                        try {
+                            return { ok: true as const, bytes: keyring.openWithWrappedKey(item) };
+                        } catch (cause) {
+                            return { ok: false as const, error: serialiseError(cause) };
+                        }
+                    }),
+                };
+
             case 'unwrapInto':
                 keyring.unwrapInto(request.handle, request.using, request.wrapped, request.aad);
 

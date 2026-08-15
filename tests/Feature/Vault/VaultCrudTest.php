@@ -175,6 +175,37 @@ describe('listing and reading', function () {
             );
     });
 
+    /*
+     | The whole vault, not a page of it.
+     |
+     | Search runs in the browser because the server cannot read a name (D5),
+     | so a paginated response would either mean the server can read them or
+     | mean the results are wrong. The cost of sending everything is measured
+     | rather than assumed — see the scale ceiling in docs/06.
+     */
+    it('sends every secret in the vault, not only one lockbox worth', function () {
+        $user = User::factory()->create();
+        $vault = Vault::factory()->ownedBy($user)->create();
+
+        $first = Lockbox::factory()->for($vault)->create();
+        $second = Lockbox::factory()->for($vault)->create();
+
+        Secret::factory()->for($first)->count(2)->create();
+        Secret::factory()->for($second)->count(3)->create();
+
+        // A vault the user also owns, whose contents must not appear here.
+        Secret::factory()
+            ->for(Lockbox::factory()->for(Vault::factory()->ownedBy($user)))
+            ->create();
+
+        $this->actingAs($user)
+            ->get("/vaults/{$vault->uuid}")
+            ->assertInertia(fn (AssertableInertia $page) => $page
+                ->has('secrets', 5)
+                ->where('secrets.0.lockboxUuid', $first->uuid)
+            );
+    });
+
     it('drops a vault from the list once it is deleted', function () {
         $user = User::factory()->create();
         $vault = Vault::factory()->ownedBy($user)->create();

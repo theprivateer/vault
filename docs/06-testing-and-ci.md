@@ -59,6 +59,28 @@ identifier, the timestamps, the payload version and the key epoch — all of it 
 [04](04-data-model.md) with its reason. In 2017 the same query would have returned the vault's
 name in the clear and a value one application key away from it.
 
+#### Padding, verified the same way
+
+The exit criterion for the Phase 4 padding work was to see the effect on stored sizes rather than
+trust the unit tests. Eight real secrets, sealed through the actual stack, measured in bytes:
+
+| secret | JSON | stored, unpadded | stored, padded |
+| --- | ---: | ---: | ---: |
+| a 4-digit PIN | 64 | 106 | **170** |
+| `hunter2` | 67 | 109 | **170** |
+| a 13-character password | 73 | 115 | **170** |
+| a 15-character password | 75 | 117 | **170** |
+| a 41-character API token | 101 | 143 | **170** |
+| a 46-character passphrase | 106 | 148 | **170** |
+| an SSH private key | 972 | 1,014 | 1,066 |
+| a 3,000-character note | 3,060 | 3,102 | 4,138 |
+
+The first six rows are the point. Unpadded, the stored length is the length of the secret plus a
+constant — a server reading its own database learns that one credential is a PIN and another is a
+41-character token without decrypting anything. Padded, all six are byte-identical at 170, and
+what remains visible is only that the last two are *bigger*, which is the accepted leakage written
+down in [02 § Accepted leakage](02-threat-model.md#accepted-leakage).
+
 ### 2. AAD binding (SR4) — Phase 1
 
 Seal a payload under record A's associated data; attempt to open it as record B; assert
@@ -103,9 +125,60 @@ degrades by accident — someone adds "remember this vault" and stores the wrong
 - Property-based round-trip tests across sizes including 0 and 1 byte.
 - Worker protocol tests, including that key material never appears in a message *out* of the
   Worker.
-- Store tests: lock wipes state synchronously.
+- Store tests: lock wipes state synchronously, **and a decrypt already in flight when the lock
+  happens discards its results rather than refilling the store it just emptied**.
+- Padding tests: two secrets of different length are stored at the same size, and an unpadded
+  version 1 payload still opens.
+- **Search is offline, asserted rather than described:** `fetch`, `XMLHttpRequest`, `WebSocket`,
+  `EventSource` and `sendBeacon` are replaced with functions that throw, and a query still
+  returns. The manual version is to switch the network off in DevTools and keep typing.
 - **A cross-implementation test** comparing a sample of outputs against PHP's `ext-sodium`, to
   catch an encoding or endianness error that JS would otherwise agree with itself about.
+
+## The scale ceiling, measured
+
+D5 puts every name and note inside the ciphertext, so the server cannot search and the browser has
+to hold the whole vault. That is only a defensible trade if somebody has measured what it costs.
+`npm run bench:vault` does, at three orders of magnitude.
+
+Apple M1, Node v22.23.2, payloads the shape of real credentials (name, value, notes, URL — around
+190 bytes of JSON, padded to the 256-byte bucket):
+
+| secrets | decrypt, batched | decrypt, one at a time | worker messages, batched → serial | build index | per query | ciphertext | heap held |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 100 | 6 ms | 7 ms | 2 → 100 | 1 ms | 0.06 ms | 0.03 MiB | ~0 MiB |
+| 1,000 | 24 ms | 35 ms | 16 → 1,000 | 5 ms | 0.06 ms | 0.3 MiB | ~1 MiB |
+| 10,000 | 184 ms | 320 ms | 157 → 10,000 | 43 ms | 0.51 ms | 2.8 MiB | ~16 MiB |
+
+**Against the exit criterion.** A 1,000-secret vault opens in 24 ms of decryption and 5 ms of
+indexing, against a budget of two seconds. There is no meaningful pressure here at all.
+
+**The honest reading of the "one at a time" column.** The benchmark runs the handler in-process,
+so it charges a `structuredClone` per message but not the thread hop a real Worker pays. The
+timings therefore understate the batching win, possibly by a lot. The message counts beside them
+do not depend on that model, and they are the real argument: opening a thousand secrets went from
+a thousand round trips to sixteen.
+
+**Where the ceiling actually is, and it is not the cryptography.** At 10,000 secrets the decrypt
+costs 184 ms — while unlocking the vault at all costs ~731 ms of Argon2id (ADR-0003). Opening a
+vault four times the size of anyone's would still be cheaper than the password stretch that
+precedes it. The binding constraints, in order:
+
+1. **Transfer.** 2.8 MiB of ciphertext is ~3.8 MiB base64 on the wire, sent on every visit to a
+   vault page. This is the first thing that will hurt, and the fix when it does is an Inertia
+   partial reload rather than a change to the cryptography.
+2. **Heap.** ~16 MiB of decrypted plaintext and index at 10,000 items. Fine in a tab; worth
+   remembering that all of it is secrets, which is why the store is wiped synchronously on lock.
+3. **Search.** 0.51 ms per query at 10,000 — still imperceptible, and it is the linear prefix scan
+   in `lib/search.ts` that grows here. A trie is the answer if it ever stops being imperceptible.
+
+**Which is the answer to "why not blind indexes".** A server-side searchable encryption scheme
+would buy a decrypt cost that is already 184 ms at a vault size nobody has, and would sell a
+per-keyword equality oracle to the server in exchange. The measurement is what says we do not need
+to make that trade — not a preference.
+
+Caveat, the same one as ADR-0003: Node and a desktop browser are both V8, so this stands in for a
+laptop and not for a phone. Phone numbers need a real device.
 
 ## End-to-end — Playwright
 

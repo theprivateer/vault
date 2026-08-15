@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { Link, router } from '@inertiajs/vue3';
-import { onBeforeUnmount, onMounted } from 'vue';
+import { onBeforeUnmount, onMounted, ref } from 'vue';
 
+import CommandPalette from '@/components/CommandPalette.vue';
 import UnlockPanel from '@/components/UnlockPanel.vue';
 import { useShared } from '@/lib/page';
 import { installLockGuards, lock, markAuthenticated, signOut, useSession } from '@/stores/session';
@@ -18,6 +19,8 @@ const page = useShared();
 const { state, isUnlocked } = useSession();
 
 let detach: (() => void) | null = null;
+
+const palette = ref<InstanceType<typeof CommandPalette> | null>(null);
 
 markAuthenticated();
 
@@ -40,12 +43,29 @@ function signOutNow(): void {
                 <Link href="/vaults" class="text-xs tracking-[0.2em] uppercase">vault</Link>
 
                 <div class="flex items-center gap-4 text-2xs">
+                    <!--
+                        The glyph carries the state as well as the colour: a
+                        status told only in orange is no status at all to
+                        anyone who cannot distinguish it, and the word is read
+                        aloud by a screen reader either way.
+                    -->
                     <span
                         class="tracking-[0.08em] uppercase"
                         :class="isUnlocked ? 'text-accent' : 'text-muted'"
+                        role="status"
                     >
-                        {{ isUnlocked ? '● unlocked' : '○ locked' }}
+                        <span aria-hidden="true">{{ isUnlocked ? '●' : '○' }}</span>
+                        {{ isUnlocked ? 'unlocked' : 'locked' }}
                     </span>
+
+                    <button
+                        v-if="isUnlocked"
+                        type="button"
+                        class="text-muted hover:text-ink"
+                        @click="palette?.show()"
+                    >
+                        search <kbd class="text-faint">/</kbd>
+                    </button>
 
                     <span v-if="page.props.auth.user" class="text-muted">
                         {{ page.props.auth.user.handle }}
@@ -73,6 +93,8 @@ function signOutNow(): void {
             <UnlockPanel v-if="requireUnlock && !isUnlocked" />
             <slot v-else />
         </main>
+
+        <CommandPalette ref="palette" />
 
         <footer class="border-t border-line">
             <div class="mx-auto flex max-w-5xl justify-between gap-4 px-6 py-4 text-2xs text-faint">

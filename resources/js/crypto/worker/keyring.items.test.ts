@@ -9,7 +9,12 @@
 import { describe, expect, it } from 'vitest';
 
 import type { AadParams } from '../aad';
-import { IntegrityError, InvalidParameterError, MalformedEnvelopeError } from '../errors';
+import {
+    IntegrityError,
+    InvalidParameterError,
+    KeyUnavailableError,
+    MalformedEnvelopeError,
+} from '../errors';
 import { generateKdfSalt, sealTo } from '../keys';
 import { utf8ToBytes } from '../primitives';
 import type { RegistrationResult } from './keyring';
@@ -198,6 +203,77 @@ describe('sealing to a public key', () => {
 
         // Still the original key: a failed unseal must not blank a live handle.
         expect(keyring.open(VAULT_KEY, before, payloadAad)).toEqual(PAYLOAD);
+    });
+});
+
+describe('opening with a wrapped key', () => {
+    /** The shape a bulk open sends for one item. */
+    const bulkItem = (stored: ReturnType<typeof createVault>) => ({
+        using: VAULT_KEY,
+        wrapped: stored.wrappedItemKey,
+        keyAad: itemKeyAad,
+        envelope: stored.payloadCt,
+        payloadAad,
+    });
+
+    it('unwraps, opens and gets back the same plaintext', () => {
+        const { keyring, account } = openAccount();
+        const stored = createVault(keyring, account.registration.x25519PublicKey);
+
+        const fresh = reopenAccount(account);
+        fresh.openSealedInto(VAULT_KEY, X25519_KEY, stored.wrappedVaultKey, membershipAad);
+
+        expect(fresh.openWithWrappedKey(bulkItem(stored))).toEqual(PAYLOAD);
+    });
+
+    /**
+     * The reason this operation exists in the keyring rather than being
+     * composed from unwrapInto + open on the main thread: the Item Key is
+     * never stored, so a vault of a thousand secrets leaves one handle behind
+     * rather than a thousand keys.
+     */
+    it('leaves no handle behind', () => {
+        const { keyring, account } = openAccount();
+        const stored = createVault(keyring, account.registration.x25519PublicKey);
+
+        const fresh = reopenAccount(account);
+        fresh.openSealedInto(VAULT_KEY, X25519_KEY, stored.wrappedVaultKey, membershipAad);
+
+        const before = [...fresh.handles];
+        fresh.openWithWrappedKey(bulkItem(stored));
+
+        expect(fresh.handles).toEqual(before);
+        expect(fresh.handles).not.toContain(ITEM_KEY);
+    });
+
+    it('still binds the payload to its own record', () => {
+        const { keyring, account } = openAccount();
+        const stored = createVault(keyring, account.registration.x25519PublicKey);
+
+        expect(() =>
+            keyring.openWithWrappedKey({
+                ...bulkItem(stored),
+                payloadAad: aad('vault.payload', OTHER_UUID),
+            }),
+        ).toThrow(IntegrityError);
+    });
+
+    it('still binds the item key to its own record', () => {
+        const { keyring, account } = openAccount();
+        const stored = createVault(keyring, account.registration.x25519PublicKey);
+
+        expect(() =>
+            keyring.openWithWrappedKey({ ...bulkItem(stored), keyAad: aad('item.key', OTHER_UUID) }),
+        ).toThrow(IntegrityError);
+    });
+
+    it('refuses when the vault key is not held', () => {
+        const { keyring, account } = openAccount();
+        const stored = createVault(keyring, account.registration.x25519PublicKey);
+
+        keyring.forget(VAULT_KEY);
+
+        expect(() => keyring.openWithWrappedKey(bulkItem(stored))).toThrow(KeyUnavailableError);
     });
 });
 

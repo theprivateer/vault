@@ -11,6 +11,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "bench:argon2": "node benchmarks/argon2.mjs",
+    "bench:vault": "vitest run --config vitest.bench.config.ts --disable-console-intercept",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "build:worker": "vite build --config vite.worker.config.ts"

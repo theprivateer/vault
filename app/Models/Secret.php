@@ -23,6 +23,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * @property Ciphertext $payload_ct
  * @property Ciphertext $wrapped_item_key
  * @property int $payload_version
+ * @property int $current_version
  * @property int $sort_order
  * @property ?int $linked_lockbox_id
  * @property-read Lockbox $lockbox
@@ -32,11 +33,22 @@ class Secret extends Model
     /** @use HasFactory<SecretFactory> */
     use HasFactory, SoftDeletes;
 
+    /**
+     * Where `current_version` starts.
+     *
+     * Set explicitly on create rather than left to the column default: an
+     * Eloquent model does not carry a database default back after an insert,
+     * so the freshly created instance would report null and the first update
+     * would compare against it.
+     */
+    public const int INITIAL_VERSION = 1;
+
     protected $fillable = [
         'uuid',
         'payload_ct',
         'wrapped_item_key',
         'payload_version',
+        'current_version',
         'sort_order',
         'linked_lockbox_id',
     ];
@@ -71,15 +83,28 @@ class Secret extends Model
     }
 
     /**
-     * @return array{uuid: string, payloadCt: string, wrappedItemKey: string, payloadVersion: int, sortOrder: int, linkedLockboxUuid: ?string, updatedAt: ?string}
+     * @return array{uuid: string, lockboxUuid: string, payloadCt: string, wrappedItemKey: string, payloadVersion: int, version: int, sortOrder: int, linkedLockboxUuid: ?string, updatedAt: ?string}
      */
     public function toClientArray(): array
     {
         return [
             'uuid' => $this->uuid,
+            /*
+             | Which lockbox this belongs to, so the browser can group a whole
+             | vault's secrets without asking again. It leaks nothing the
+             | foreign key does not already leak, and searching a vault
+             | client-side is impossible without it.
+             */
+            'lockboxUuid' => $this->lockbox->uuid,
             'payloadCt' => $this->payload_ct->base64,
             'wrappedItemKey' => $this->wrapped_item_key->base64,
             'payloadVersion' => $this->payload_version,
+            /*
+             | The optimistic-concurrency token. An update is accepted only if
+             | the client still believes this number, which is how two people
+             | editing one secret produces a refusal rather than a silent loss.
+             */
+            'version' => $this->current_version,
             'sortOrder' => $this->sort_order,
             'linkedLockboxUuid' => $this->linkedLockbox?->uuid,
             'updatedAt' => $this->updated_at?->toIso8601String(),

@@ -21,26 +21,36 @@ use Inertia\Response;
  */
 class LockboxController extends Controller
 {
+    /**
+     * One lockbox, delivered with the rest of its vault around it.
+     *
+     * Both the lockbox list and the secret list are vault-wide rather than
+     * scoped to this lockbox, which is not an accident of convenience:
+     *
+     *  - The browser has to render a *linked* lockbox by name, and it can only
+     *    do that by decrypting that lockbox's payload. The server cannot
+     *    resolve the name on its behalf.
+     *  - Search is client-side (D5), so it works over the vault the user is in,
+     *    not the folder they happen to have open. Sending the same shape from
+     *    both pages means moving between them re-uses the decrypted store
+     *    instead of paying for the whole vault again.
+     */
     public function show(Request $request, Lockbox $lockbox): Response
     {
 
-        $secrets = $lockbox->secrets()
-            ->with('linkedLockbox')
+        $siblings = $lockbox->vault->lockboxes()
+            ->withCount('secrets')
+            ->orderBy('sort_order')
+            ->orderBy('uuid')
+            ->get();
+
+        $secrets = Secret::query()
+            ->whereIn('lockbox_id', $siblings->modelKeys())
+            ->with(['lockbox', 'linkedLockbox'])
             ->orderBy('sort_order')
             ->orderBy('uuid')
             ->get()
             ->map(fn (Secret $secret): array => $secret->toClientArray());
-
-        /*
-         | The whole vault's lockboxes travel with the page so the browser can
-         | render a link target's name, which it can only do by decrypting that
-         | lockbox's payload. The server cannot resolve the name on its behalf.
-         */
-        $linkable = $lockbox->vault->lockboxes()
-            ->orderBy('sort_order')
-            ->orderBy('uuid')
-            ->get()
-            ->map(fn (Lockbox $sibling): array => $sibling->toClientArray());
 
         return Inertia::render('lockboxes/Show', [
             /*
@@ -51,7 +61,7 @@ class LockboxController extends Controller
             'vault' => $lockbox->vault->toClientArray($this->membershipFor($lockbox->vault, $request)),
             'lockbox' => $lockbox->toClientArray(),
             'secrets' => $secrets,
-            'lockboxes' => $linkable,
+            'lockboxes' => $siblings->map(fn (Lockbox $sibling): array => $sibling->toClientArray()),
         ]);
     }
 

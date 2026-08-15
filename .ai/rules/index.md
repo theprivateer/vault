@@ -5,7 +5,8 @@ Before planning or editing, find the row whose globs match the file's path and r
 | Applies to | Rule file |
 | --- | --- |
 | app/** | .ai/rules/app.md |
-| resources/js/crypto/** | .ai/rules/crypto.md |
+| app/Http/Controllers/SecretController.php | .ai/rules/controllers.md |
+| resources/js/crypto/**, resources/js/crypto/padding.ts | .ai/rules/crypto.md |
 | docs/** | .ai/rules/docs.md |
 | resources/js/** | .ai/rules/js.md |
 | resources/js/lib/** | .ai/rules/lib.md |
@@ -13,4 +14,5 @@ Before planning or editing, find the row whose globs match the file's path and r
 | resources/js/pages/** | .ai/rules/pages.md |
 | app/Policies/** | .ai/rules/policies.md |
 | routes/** | .ai/rules/routes.md |
+| resources/js/stores/** | .ai/rules/stores.md |
 | resources/js/crypto/worker/** | .ai/rules/worker.md |

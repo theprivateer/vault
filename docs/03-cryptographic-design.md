@@ -143,6 +143,36 @@ Two decisions worth stating outright:
   32 bytes and has no schema to evolve. Tying it to the payload version would change an item key's
   binding every time an unrelated field was added to the JSON beside it, for no benefit.
 
+### Payload padding
+
+Item payloads are padded to a bucket size *before* they are sealed. AEAD ciphertext is exactly as
+long as its plaintext plus fixed overhead, so an unpadded payload publishes the length of the
+secret inside it to anyone holding the database.
+
+```
+padded = plaintext ‖ 0x80 ‖ 0x00 …        to the next bucket
+buckets = 64, 128, 256, 512, 1024, 2048, 4096, then multiples of 4096
+```
+
+Three choices worth naming:
+
+- **ISO/IEC 7816-4 delimiter rather than a length prefix.** The delimiter is always written, so
+  the encoding is unambiguous even for a plaintext ending in `0x00` or `0x80`, and unpadding
+  cannot be made to read past the end of the buffer the way a corrupted length prefix can. It
+  costs one byte more.
+- **Inside the AEAD, not around it.** The padding is covered by the tag, so a server cannot strip
+  it back off to recover the original length.
+- **Buckets rather than one fixed size.** A single size hides length completely and makes a
+  60-byte password cost as much to store as a 4 KiB note. The buckets keep worst-case waste under
+  50% and collapse the whole realistic range of credentials into five sizes. What still leaks is
+  the bucket, and that is written down in [02 § Accepted leakage](02-threat-model.md#accepted-leakage).
+
+**Padding is what `payload_version` 2 means.** There is no safe way to detect padding after the
+fact — an unpadded v1 payload run through the unpad routine would either throw or, worse,
+silently truncate a secret whose last byte happened to be `0x80`. So the reader is told by the
+version, and because the version is bound into the AAD, a server cannot relabel a v2 payload as
+v1 to get the old handling. Version 1 is read and never written.
+
 #### The client builds the AAD, always
 
 The server sends ciphertext, UUIDs and version numbers. It never sends associated data, and the

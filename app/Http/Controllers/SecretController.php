@@ -6,7 +6,9 @@ use App\Http\Requests\StoreSecretRequest;
 use App\Http\Requests\UpdateSecretRequest;
 use App\Models\Lockbox;
 use App\Models\Secret;
+use App\Support\Ciphertext;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Validation\ValidationException;
 
 /**
  * Secrets.
@@ -25,6 +27,7 @@ class SecretController extends Controller
             'payload_ct' => $request->string('payload_ct')->toString(),
             'wrapped_item_key' => $request->string('wrapped_item_key')->toString(),
             'payload_version' => $request->integer('payload_version'),
+            'current_version' => Secret::INITIAL_VERSION,
             'sort_order' => $request->integer('sort_order'),
             'linked_lockbox_id' => $this->linkedLockboxId($request, $lockbox),
         ]);
@@ -32,15 +35,58 @@ class SecretController extends Controller
         return back();
     }
 
+    /**
+     * Re-encrypts a secret, refusing if someone else got there first.
+     *
+     * **Why the server has to arbitrate this at all.** Nothing here can merge
+     * two edits: the two payloads are ciphertext under different item keys, and
+     * merging them would mean reading them. The only options are to detect the
+     * collision or to lose one silently, and losing a password silently is the
+     * kind of bug people discover months later when they need it.
+     *
+     * `current_version` is the token, compared inside the `where` of the update
+     * itself rather than read and then checked. A read-then-write leaves a
+     * window between the two in which the other writer commits, which on a
+     * concurrent edit — the exact case being defended — is when it is most
+     * likely to matter.
+     *
+     * **Not HTTP 409.** Inertia reserves 409 for its own asset-version
+     * protocol and answers one with a hard page reload, which would throw away
+     * the user's unsaved edit while telling them nothing. A validation error
+     * puts the message beside the form with the text still in it.
+     */
     public function update(UpdateSecretRequest $request, Secret $secret): RedirectResponse
     {
+        $expected = $request->integer('expected_version');
 
-        $secret->update([
-            'payload_ct' => $request->string('payload_ct')->toString(),
-            'wrapped_item_key' => $request->string('wrapped_item_key')->toString(),
-            'payload_version' => $request->integer('payload_version'),
-            'linked_lockbox_id' => $this->linkedLockboxId($request, $secret->lockbox),
-        ]);
+        /*
+         | Canonicalised by hand, because a query-builder update writes columns
+         | without running the model's casts — and the Ciphertext cast is where
+         | base64 is normalised and size-checked. Passing the request string
+         | straight through would store whatever padding the client happened to
+         | send and skip the cap.
+         */
+        $written = Secret::query()
+            ->whereKey($secret->getKey())
+            ->where('current_version', $expected)
+            ->update([
+                'payload_ct' => Ciphertext::fromBase64($request->string('payload_ct')->toString())->base64,
+                'wrapped_item_key' => Ciphertext::fromBase64(
+                    $request->string('wrapped_item_key')->toString()
+                )->base64,
+                'payload_version' => $request->integer('payload_version'),
+                'linked_lockbox_id' => $this->linkedLockboxId($request, $secret->lockbox),
+                'current_version' => $expected + 1,
+                'updated_at' => now(),
+            ]);
+
+        if ($written === 0) {
+            throw ValidationException::withMessages([
+                'expected_version' => 'This secret was changed somewhere else after you opened it. '
+                    .'Reload to see the current value — your edit has not been saved, and neither '
+                    .'version has been lost.',
+            ]);
+        }
 
         return back();
     }

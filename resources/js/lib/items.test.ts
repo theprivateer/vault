@@ -8,15 +8,17 @@
  */
 import { describe, expect, it } from 'vitest';
 
+import { MIN_BUCKET } from '@/crypto/padding';
 import { CryptoClient } from '@/crypto/worker/client';
 import { installHandler, type WorkerScope } from '@/crypto/worker/handler';
 import type { Reply, Request } from '@/crypto/worker/protocol';
 import { itemKeyHandle, vaultKeyHandle } from '@/crypto/worker/protocol';
 
-import { toBase64 } from './bytes';
+import { fromBase64, toBase64 } from './bytes';
 import {
     loadIdentity,
     openItem,
+    PAYLOAD_VERSION,
     openVaultKey,
     sealItem,
     sealNewVault,
@@ -148,7 +150,7 @@ describe('creating and reopening a vault', () => {
             uuid,
             payloadCt: sealed.payload_ct,
             wrappedItemKey: sealed.wrapped_item_key,
-            payloadVersion: 1,
+            payloadVersion: PAYLOAD_VERSION,
         });
 
         expect(
@@ -228,7 +230,7 @@ describe('associated data binding', () => {
                 uuid: LOCKBOX_UUID,
                 payloadCt: sealed.payload_ct,
                 wrappedItemKey: sealed.wrapped_item_key,
-                payloadVersion: 1,
+                payloadVersion: PAYLOAD_VERSION,
             }),
         ).rejects.toThrow();
     });
@@ -248,7 +250,7 @@ describe('associated data binding', () => {
                 uuid: LOCKBOX_UUID,
                 payloadCt: sealed.payload_ct,
                 wrappedItemKey: sealed.wrapped_item_key,
-                payloadVersion: 1,
+                payloadVersion: PAYLOAD_VERSION,
             }),
         ).rejects.toThrow();
     });
@@ -270,7 +272,7 @@ describe('associated data binding', () => {
                 uuid: VAULT_UUID,
                 payloadCt: sealed.payload_ct,
                 wrappedItemKey: sealed.wrapped_item_key,
-                payloadVersion: 1,
+                payloadVersion: PAYLOAD_VERSION,
                 keyEpoch: 1,
                 updatedAt: null,
                 membership: {
@@ -280,6 +282,120 @@ describe('associated data binding', () => {
                     wrappedVaultKey: sealed.wrapped_vault_key,
                     keyEpoch: 1,
                 },
+            }),
+        ).rejects.toThrow();
+    });
+});
+
+/**
+ * Length hiding, observed where it actually matters: on the stored blob.
+ *
+ * The padding module tests the transform in isolation. These test the property
+ * a hostile server would try to exploit — that the stored ciphertext length no
+ * longer tracks the length of the secret inside it.
+ */
+describe('padding stored payloads', () => {
+    async function storedLength(value: string): Promise<number> {
+        const crypto = client();
+        await account(crypto);
+        await crypto.generateInto(vaultKeyHandle(VAULT_UUID));
+
+        const sealed = await sealItem(crypto, VAULT_UUID, 'secret.payload', SECRET_UUID, {
+            type: 'password',
+            key: 'k',
+            value,
+            notes: '',
+        });
+
+        return fromBase64(sealed.payload_ct).length;
+    }
+
+    /**
+     * The whole point, stated as the difference it makes: without padding
+     * these two rows differ by ten bytes, and ten bytes is the length of the
+     * password. With it they are byte-identical in size.
+     */
+    it('stores secrets of different length at the same size', async () => {
+        const [short, longer] = await Promise.all([storedLength('a'), storedLength('a'.repeat(11))]);
+
+        expect(short).toBe(longer);
+    });
+
+    it('does eventually differ, which is what a bucket means rather than a fixed size', async () => {
+        const [small, large] = await Promise.all([storedLength('a'), storedLength('a'.repeat(3000))]);
+
+        expect(large).toBeGreaterThan(small);
+    });
+
+    it('adds a constant overhead on top of the bucket, whichever bucket it is', async () => {
+        const [small, large] = await Promise.all([storedLength('a'), storedLength('a'.repeat(200))]);
+
+        // Header, nonce and tag: fixed, and independent of the plaintext.
+        expect(small - MIN_BUCKET).toBe(large - 4 * MIN_BUCKET);
+    });
+});
+
+/**
+ * Payloads written before Phase 4 are not padded, and there is no way to tell
+ * from the bytes — so the reader is told by the version, which is bound into
+ * the AAD and therefore not something a server can relabel.
+ */
+describe('reading payloads written before padding existed', () => {
+    it('opens an unpadded version 1 payload', async () => {
+        const crypto = client();
+        await account(crypto);
+        await crypto.generateInto(vaultKeyHandle(VAULT_UUID));
+
+        // Sealed the way this codebase did before Phase 4: raw JSON, no pad.
+        const handle = itemKeyHandle(SECRET_UUID);
+        await crypto.generateInto(handle);
+
+        const json = new TextEncoder().encode(JSON.stringify({ name: 'Legacy', description: '' }));
+
+        const payloadCt = await crypto.seal(handle, json, {
+            context: 'lockbox.payload',
+            subject: SECRET_UUID,
+            version: 1,
+        });
+
+        const wrappedItemKey = await crypto.wrapFrom(handle, vaultKeyHandle(VAULT_UUID), {
+            context: 'item.key',
+            subject: SECRET_UUID,
+            version: 1,
+        });
+
+        const opened = await openItem<LockboxPayload>(crypto, VAULT_UUID, 'lockbox.payload', {
+            uuid: SECRET_UUID,
+            payloadCt: toBase64(payloadCt),
+            wrappedItemKey: toBase64(wrappedItemKey),
+            payloadVersion: 1,
+        });
+
+        expect(opened).toEqual({ name: 'Legacy', description: '' });
+    });
+
+    it('refuses a padded payload that claims to be version 1', async () => {
+        const crypto = client();
+        await account(crypto);
+        await crypto.generateInto(vaultKeyHandle(VAULT_UUID));
+
+        const sealed = await sealItem(crypto, VAULT_UUID, 'lockbox.payload', LOCKBOX_UUID, {
+            name: 'Databases',
+            description: '',
+        });
+
+        /*
+         | Relabelling is caught by the AAD long before the padding rule gets a
+         | say: the version is part of the associated data, so a payload sealed
+         | at v2 does not verify when opened as v1. Both defences are real, and
+         | this asserts the outer one holds.
+         */
+        await expect(
+            openItem<LockboxPayload>(crypto, VAULT_UUID, 'lockbox.payload', {
+                uuid: LOCKBOX_UUID,
+                payloadCt: sealed.payload_ct,
+                wrappedItemKey: sealed.wrapped_item_key,
+                payloadVersion: 1,
             }),
         ).rejects.toThrow();
     });

@@ -10,12 +10,27 @@
 import { ref, type Ref } from 'vue';
 
 import type { AadContext } from '@/crypto/aad';
-import { CryptoError } from '@/crypto/errors';
+import { CryptoError, MalformedEnvelopeError } from '@/crypto/errors';
 import type { CryptoClient } from '@/crypto/worker/client';
 import { isIntegrityFailure } from '@/crypto/worker/client';
 
 import type { EncryptedItem, VaultRecord } from './items';
-import { openItem, openVaultKey } from './items';
+import { bulkOpenItem, openItem, openVaultKey, parsePayload } from './items';
+
+/**
+ * How many items go to the Worker in one request.
+ *
+ * A batch is a single postMessage and a single unbroken run of the Worker's
+ * event loop, so the size trades two things off: larger batches amortise the
+ * boundary crossing further, and smaller batches report progress more often
+ * and leave the Worker responsive to a lock arriving mid-decrypt. Sixty-four is
+ * around 15 ms of work at the measured per-item cost — under a frame, and fine
+ * enough that a thousand-item vault reports progress sixteen times.
+ */
+export const BATCH_SIZE = 64;
+
+/** Called after each batch, with a running count and the total. */
+export type ProgressCallback = (done: number, total: number) => void;
 
 export interface Opened<R, P> {
     record: R;
@@ -50,19 +65,43 @@ export async function openAll<R extends EncryptedItem, P>(
     context: AadContext,
     records: readonly R[],
     label: (record: R) => string,
+    onProgress?: ProgressCallback,
 ): Promise<Array<Opened<R, P>>> {
     const opened: Array<Opened<R, P>> = [];
 
-    for (const record of records) {
-        try {
-            opened.push({
-                record,
-                payload: await openItem<P>(client, vaultUuid, context, record),
-                error: null,
-            });
-        } catch (error) {
-            opened.push({ record, payload: null, error: describeFailure(error, label(record)) });
-        }
+    for (let start = 0; start < records.length; start += BATCH_SIZE) {
+        const batch = records.slice(start, start + BATCH_SIZE);
+
+        const results = await client.openMany(
+            batch.map((record) => bulkOpenItem(vaultUuid, context, record)),
+        );
+
+        batch.forEach((record, index) => {
+            const result = results[index];
+
+            try {
+                if (!result) {
+                    throw new MalformedEnvelopeError('The worker returned no result for this item.');
+                }
+
+                if (!result.ok) {
+                    throw result.error;
+                }
+
+                // Parsing is on this side of the boundary, and can fail on its
+                // own: verified bytes that are not the JSON this build expects
+                // are still an error to report rather than a blank row.
+                opened.push({
+                    record,
+                    payload: parsePayload<P>(result.bytes, record.payloadVersion),
+                    error: null,
+                });
+            } catch (error) {
+                opened.push({ record, payload: null, error: describeFailure(error, label(record)) });
+            }
+        });
+
+        onProgress?.(opened.length, records.length);
     }
 
     return opened;

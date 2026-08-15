@@ -14,9 +14,9 @@ import { installHandler, type WorkerScope } from '@/crypto/worker/handler';
 import type { Reply, Request } from '@/crypto/worker/protocol';
 import { vaultKeyHandle } from '@/crypto/worker/protocol';
 
-import { describeFailure, openAll, openVault, useDecryption } from './decrypt';
+import { BATCH_SIZE, describeFailure, openAll, openVault, useDecryption } from './decrypt';
 import { fromBase64, toBase64 } from './bytes';
-import { sealItem, type VaultRecord } from './items';
+import { openItem, PAYLOAD_VERSION, sealItem, type VaultRecord } from './items';
 
 const VAULT_UUID = '0192f3a1-4b2c-7d3e-8f90-a1b2c3d4e5f7';
 const LOCKBOX_UUID = '0192f3a1-4b2c-7d3e-8f90-a1b2c3d4e5f9';
@@ -107,13 +107,13 @@ describe('openAll', () => {
                     uuid: LOCKBOX_UUID,
                     payloadCt: good.payload_ct,
                     wrappedItemKey: good.wrapped_item_key,
-                    payloadVersion: 1,
+                    payloadVersion: PAYLOAD_VERSION,
                 },
                 {
                     uuid: OTHER_UUID,
                     payloadCt: tamper(bad.payload_ct),
                     wrappedItemKey: bad.wrapped_item_key,
-                    payloadVersion: 1,
+                    payloadVersion: PAYLOAD_VERSION,
                 },
             ],
             () => 'This secret',
@@ -146,19 +146,115 @@ describe('openAll', () => {
                     uuid: LOCKBOX_UUID,
                     payloadCt: first.payload_ct,
                     wrappedItemKey: first.wrapped_item_key,
-                    payloadVersion: 1,
+                    payloadVersion: PAYLOAD_VERSION,
                 },
                 {
                     uuid: OTHER_UUID,
                     payloadCt: second.payload_ct,
                     wrappedItemKey: second.wrapped_item_key,
-                    payloadVersion: 1,
+                    payloadVersion: PAYLOAD_VERSION,
                 },
             ],
             () => 'This secret',
         );
 
         expect(opened.map((entry) => entry.payload?.n)).toEqual([1, 2]);
+    });
+});
+
+/**
+ * Batching is a performance change, so what these check is that it changed
+ * nothing else: the same order, the same per-item isolation, across a list
+ * long enough to span several batches.
+ */
+describe('batching', () => {
+    const COUNT = BATCH_SIZE * 2 + 5;
+
+    /** A list of sealed records under one vault key, each with a distinct uuid. */
+    async function manyRecords(crypto: CryptoClient) {
+        await crypto.generateInto(vaultKeyHandle(VAULT_UUID));
+
+        const records = [];
+
+        for (let index = 0; index < COUNT; index++) {
+            // Distinct v7-shaped uuids: the last four hex digits count up.
+            const uuid = `0192f3a1-4b2c-7d3e-8f90-a1b2c3d4${index.toString(16).padStart(4, '0')}`;
+            const sealed = await sealItem(crypto, VAULT_UUID, 'secret.payload', uuid, { n: index });
+
+            records.push({
+                uuid,
+                payloadCt: sealed.payload_ct,
+                wrappedItemKey: sealed.wrapped_item_key,
+                payloadVersion: PAYLOAD_VERSION,
+            });
+        }
+
+        return records;
+    }
+
+    it('opens a list spanning several batches, in order', async () => {
+        const crypto = client();
+        const records = await manyRecords(crypto);
+
+        const opened = await openAll<(typeof records)[number], { n: number }>(
+            crypto,
+            VAULT_UUID,
+            'secret.payload',
+            records,
+            () => 'This secret',
+        );
+
+        expect(opened.map((entry) => entry.payload?.n)).toEqual(records.map((_, index) => index));
+    });
+
+    it('reports progress as a running count, ending at the total', async () => {
+        const crypto = client();
+        const records = await manyRecords(crypto);
+        const seen: Array<[number, number]> = [];
+
+        await openAll(
+            crypto,
+            VAULT_UUID,
+            'secret.payload',
+            records,
+            () => 'This secret',
+            (done, total) => seen.push([done, total]),
+        );
+
+        expect(seen).toEqual([
+            [BATCH_SIZE, COUNT],
+            [BATCH_SIZE * 2, COUNT],
+            [COUNT, COUNT],
+        ]);
+    });
+
+    it('still isolates a failure in the middle of a batch', async () => {
+        const crypto = client();
+        const records = await manyRecords(crypto);
+        const target = BATCH_SIZE + 3;
+
+        // Non-null: the index is inside a list of COUNT records.
+        records[target]!.payloadCt = tamper(records[target]!.payloadCt);
+
+        const opened = await openAll<(typeof records)[number], { n: number }>(
+            crypto,
+            VAULT_UUID,
+            'secret.payload',
+            records,
+            () => 'This secret',
+        );
+
+        expect(opened[target]?.error).toContain('This secret');
+        expect(opened.filter((entry) => entry.error !== null)).toHaveLength(1);
+        expect(opened[target - 1]?.payload).toEqual({ n: target - 1 });
+        expect(opened[target + 1]?.payload).toEqual({ n: target + 1 });
+    });
+
+    it('opens an empty list without touching the worker', async () => {
+        const crypto = client();
+
+        expect(await openAll(crypto, VAULT_UUID, 'secret.payload', [], () => 'This secret')).toEqual([]);
+        expect(crypto.running).toBe(false);
     });
 });
 
@@ -176,7 +272,7 @@ describe('openVault', () => {
             uuid: VAULT_UUID,
             payloadCt: 'AQE=',
             wrappedItemKey: 'AQE=',
-            payloadVersion: 1,
+            payloadVersion: PAYLOAD_VERSION,
             keyEpoch: 1,
             updatedAt: null,
             membership: { uuid: OTHER_UUID, role: 'owner', wrappedVaultKey: 'AQE=', keyEpoch: 1 },
@@ -209,5 +305,47 @@ describe('useDecryption', () => {
 
         await run(() => Promise.resolve());
         expect(failure.value).toBe('');
+    });
+});
+
+/**
+ * The defensive branch: a worker reply with fewer results than the batch had
+ * items.
+ *
+ * It should not be reachable — the handler maps over the request — but "should
+ * not" is how a list silently loses a row. A short reply produces an error on
+ * the missing item rather than an entry with no payload and no explanation
+ * (SR3).
+ */
+describe('a short reply from the worker', () => {
+    const stubClient = (results: unknown[]) =>
+        ({ openMany: () => Promise.resolve(results) }) as unknown as CryptoClient;
+
+    const record = {
+        uuid: LOCKBOX_UUID,
+        payloadCt: 'AQE=',
+        wrappedItemKey: 'AQE=',
+        payloadVersion: PAYLOAD_VERSION,
+    };
+
+    it('reports the item it has no answer for', async () => {
+        const opened = await openAll(
+            stubClient([]),
+            VAULT_UUID,
+            'secret.payload',
+            [record],
+            () => 'This secret',
+        );
+
+        expect(opened[0]?.payload).toBeNull();
+        // The error explains itself, so describeFailure passes it through
+        // rather than replacing it with the row label.
+        expect(opened[0]?.error).toContain('no result');
+    });
+
+    it('throws rather than returning nothing from a single open', async () => {
+        await expect(openItem(stubClient([]), VAULT_UUID, 'secret.payload', record)).rejects.toThrow(
+            /no result/,
+        );
     });
 });

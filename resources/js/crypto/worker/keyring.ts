@@ -20,7 +20,7 @@ import {
 } from '../keys';
 import type { KdfParams } from '../primitives';
 import { KEY_LENGTH, zeroise } from '../primitives';
-import type { KeyHandle } from './protocol';
+import type { BulkOpenItem, KeyHandle } from './protocol';
 import { ED25519_KEY, USER_KEY, X25519_KEY } from './protocol';
 
 /**
@@ -322,6 +322,30 @@ export class Keyring {
 
         this.forget(handle);
         this.keys.set(handle, key);
+    }
+
+    /**
+     * Unwraps an Item Key, opens one payload with it, and zeroises it again.
+     *
+     * The Item Key is never stored under a handle. Nothing needs it a second
+     * time — every write generates a fresh one — so keeping it would mean a
+     * keyring that grows by one entry per secret ever displayed, a thousand
+     * live keys in a thousand-secret vault, and a correspondingly larger prize
+     * for anything that reads Worker memory. Unwrapping it per open costs one
+     * ChaCha20 pass over 32 bytes, which is nothing.
+     *
+     * The `finally` matters: the key is wiped whether the payload verified or
+     * not, and an integrity failure is exactly the case where something has
+     * gone wrong and the cleanup is most likely to be skipped.
+     */
+    openWithWrappedKey({ using, wrapped, keyAad, envelope, payloadAad }: BulkOpenItem): Uint8Array {
+        const itemKey = unwrapKey(this.require(using), wrapped, keyAad);
+
+        try {
+            return open(itemKey, envelope, payloadAad);
+        } finally {
+            zeroise(itemKey);
+        }
     }
 
     seal(handle: KeyHandle, plaintext: Uint8Array, aad: AadParams): Uint8Array {

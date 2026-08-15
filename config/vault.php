@@ -48,15 +48,19 @@ return [
     | claiming a version nothing here produces — which is what stops a client
     | writing data that no other client can interpret.
     |
+    | Version 2 pads the plaintext to a bucket size before sealing it, so the
+    | stored length names a bucket rather than a character count. Version 1 is
+    | still accepted because rows written before Phase 4 exist and must stay
+    | readable; nothing writes it any more. Dropping it is a data migration,
+    | not a config change, and one the server cannot perform.
+    |
     | The size cap is deliberately generous compared with a credential and
     | deliberately far below the column limit. It bounds what a compromised
-    | session can push into the database, nothing more. Phase 4 pads payloads
-    | to bucket sizes before encryption, which will make the stored lengths
-    | far less informative than the cap suggests.
+    | session can push into the database, nothing more.
     |
     */
 
-    'payload_versions' => [1],
+    'payload_versions' => [1, 2],
 
     'max_payload_bytes' => (int) env('VAULT_MAX_PAYLOAD_BYTES', 65536),
 

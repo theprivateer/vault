@@ -630,6 +630,104 @@ describe('vault keys through the client', () => {
     });
 });
 
+/**
+ * Bulk opening: the same guarantees as a sequence of single opens, in one
+ * crossing of the boundary.
+ *
+ * The batch is what makes a large vault usable, so the risk it introduces is
+ * that it quietly behaves differently from the path it replaces — a whole
+ * batch failing on one bad row, or an integrity failure arriving as something
+ * `isIntegrityFailure` no longer recognises. Both are checked here.
+ */
+describe('bulk opening through the client', () => {
+    const VAULT_UUID = '0192f3a1-4b2c-7d3e-8f90-a1b2c3d4e5f7';
+    const OTHER_UUID = '0192f3a1-4b2c-7d3e-8f90-a1b2c3d4e5f8';
+
+    const VAULT = vaultKeyHandle(VAULT_UUID);
+
+    const keyAad = (subject: string): AadParams => ({ context: 'item.key', subject, version: 1 });
+    const bodyAad = (subject: string): AadParams => ({
+        context: 'secret.payload',
+        subject,
+        version: 1,
+    });
+
+    /** Seals one item under the vault key and returns what a server would store. */
+    async function store(client: CryptoClient, uuid: string, body: string) {
+        const handle = itemKeyHandle(uuid);
+
+        await client.generateInto(handle);
+
+        const envelope = await client.seal(handle, utf8ToBytes(body), bodyAad(uuid));
+        const wrapped = await client.wrapFrom(handle, VAULT, keyAad(uuid));
+
+        await client.forget(handle);
+
+        return { using: VAULT, wrapped, keyAad: keyAad(uuid), envelope, payloadAad: bodyAad(uuid) };
+    }
+
+    it('opens a batch in order', async () => {
+        const { client } = clientWithWorker();
+        await client.generateInto(VAULT);
+
+        const items = [await store(client, VAULT_UUID, 'first'), await store(client, OTHER_UUID, 'second')];
+
+        const results = await client.openMany(items);
+
+        expect(results.map((result) => (result.ok ? new TextDecoder().decode(result.bytes) : null))).toEqual([
+            'first',
+            'second',
+        ]);
+    });
+
+    it('isolates a failure to the item that failed', async () => {
+        const { client } = clientWithWorker();
+        await client.generateInto(VAULT);
+
+        const good = await store(client, VAULT_UUID, 'readable');
+        const relocated = { ...(await store(client, OTHER_UUID, 'moved')), payloadAad: bodyAad(VAULT_UUID) };
+
+        const [first, second, third] = await client.openMany([good, relocated, good]);
+
+        expect(first?.ok).toBe(true);
+        expect(second?.ok).toBe(false);
+        expect(third?.ok).toBe(true);
+    });
+
+    it('rebuilds an integrity failure into something isIntegrityFailure recognises', async () => {
+        const { client } = clientWithWorker();
+        await client.generateInto(VAULT);
+
+        const relocated = { ...(await store(client, OTHER_UUID, 'moved')), keyAad: keyAad(VAULT_UUID) };
+
+        const [result] = await client.openMany([relocated]);
+
+        expect(result?.ok).toBe(false);
+        expect(result?.ok === false && isIntegrityFailure(result.error)).toBe(true);
+    });
+
+    it('fails the whole request when the vault key is not held', async () => {
+        const { client } = clientWithWorker();
+        await client.generateInto(VAULT);
+
+        const item = await store(client, VAULT_UUID, 'unreachable');
+        await client.forget(VAULT);
+
+        // Per item, not per request: the batch still returns, and every entry
+        // in it reports the same missing key.
+        const [result] = await client.openMany([item]);
+
+        expect(result?.ok).toBe(false);
+        expect(result?.ok === false && result.error.name).toBe('KeyUnavailableError');
+    });
+
+    it('accepts an empty batch', async () => {
+        const { client } = clientWithWorker();
+
+        expect(await client.openMany([])).toEqual([]);
+    });
+});
+
 /*
  | The boundary that broke in the browser while every test here was green.
  |

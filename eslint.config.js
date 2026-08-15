@@ -98,7 +98,7 @@ export default ts.config(
     {
         // Build config and benchmark scripts live outside the tsconfig project,
         // so type-aware rules have no program to work from.
-        files: ['*.config.{js,ts}', 'benchmarks/**/*.mjs'],
+        files: ['*.config.{js,ts}', 'benchmarks/**/*.{mjs,ts}'],
         extends: [ts.configs.disableTypeChecked],
         languageOptions: {
             globals: {

@@ -34,6 +34,9 @@ INSERT INTO lockboxes VALUES(1,'01a0024a-2850-…',1,'AQExfPmBs2PDMI23HwdKwnFY/y
 INSERT INTO secrets   VALUES(1,'01a0024a-2851-…',1,'AQFPkKYiNf23AnhW8KKdDOQnSx7IIgHt0IoqKEhx9atj…
 ```
 
+Those three rows are also all padded to bucket sizes before encryption, so their stored lengths
+say which bucket rather than how long the password is.
+
 Grepping the whole dump for any of that plaintext returns nothing. The only readable columns are
 the identifier, the timestamps, the payload version and the key epoch — each one listed in
 [`docs/04-data-model.md`](docs/04-data-model.md) with the reason it is not encrypted. A
@@ -74,7 +77,7 @@ Read in this order:
 
 ## Status
 
-Phases 0–3 of [thirteen](docs/05-implementation-plan.md) are complete: a working single-user
+Phases 0–4 of [thirteen](docs/05-implementation-plan.md) are complete: a working single-user
 zero-knowledge vault.
 
 - **Phase 0** — Inertia + Vue + TypeScript strict, a nonce-based CSP enforced from the first
@@ -85,10 +88,13 @@ zero-knowledge vault.
 - **Phase 2** — invite-only registration, split-key login, the recovery kit, password change, TOTP,
   and the unlock state machine.
 - **Phase 3** — vaults, lockboxes and secrets, end to end, plus the leak canary and the IDOR suite.
+- **Phase 4** — the decrypted-item store and its synchronous wipe on lock, bulk decryption in the
+  Worker, client-side search, payload padding, optimistic writes with concurrent-edit detection,
+  and the scale ceiling measured rather than guessed at.
 
-Next is [Phase 4](docs/05-implementation-plan.md#phase-4--client-state-search--ux): client-side
-search, and measuring how far this scales before the "decrypt everything in the browser" approach
-becomes a problem.
+Next is [Phase 5](docs/05-implementation-plan.md#phase-5--sharing-membership--revocation): sharing
+by fingerprint-verified grant, and re-keying a vault on revocation. The hardest phase, and the one
+where the asymmetric layer earns its place.
 
 ## Stack
 
@@ -139,6 +145,8 @@ npm run types                 # tsc --noEmit
 npm run lint                  # ESLint
 vendor/bin/pint               # formatting
 vendor/bin/phpstan analyse    # static analysis at max level
+npm run bench:vault           # the scale ceiling, at 100 / 1,000 / 10,000 secrets
+npm run bench:argon2          # password stretching cost
 ```
 
 CI runs all of the above on every push. Several of the tests are load-bearing security controls

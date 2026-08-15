@@ -15,7 +15,10 @@ import {
     WorkerUnavailableError,
 } from '../errors';
 import type { RegistrationResult } from './keyring';
-import type { KeyHandle, Reply, Request, SerialisedError } from './protocol';
+import type { BulkOpenItem, BulkOpenResult, KeyHandle, Reply, Request, SerialisedError } from './protocol';
+
+/** A bulk open result, with its error rebuilt into a real class. */
+export type OpenedBytes = { ok: true; bytes: Uint8Array } | { ok: false; error: CryptoError };
 
 /** Injectable so tests can supply a fake in place of a real Worker. */
 export type WorkerFactory = () => Worker;
@@ -216,6 +219,25 @@ export class CryptoClient {
         const { bytes } = await this.send<{ bytes: Uint8Array }>({ op: 'open', handle, envelope, aad });
 
         return bytes;
+    }
+
+    /**
+     * Opens a batch of items in one crossing of the Worker boundary.
+     *
+     * Errors are rebuilt into real `CryptoError` instances here rather than
+     * left as the wire's `{name, message}`, so a caller can use
+     * `isIntegrityFailure` on a bulk result exactly as it would on a single
+     * one. Batching must not change how a failure is recognised.
+     */
+    async openMany(items: readonly BulkOpenItem[]): Promise<OpenedBytes[]> {
+        const { results } = await this.send<{ results: BulkOpenResult[] }>({
+            op: 'openMany',
+            items: [...items],
+        });
+
+        return results.map((result) =>
+            result.ok ? result : { ok: false as const, error: rebuildError(result.error) },
+        );
     }
 
     async unwrapInto(request: Omit<Extract<Request, { op: 'unwrapInto' }>, 'op'>): Promise<void> {

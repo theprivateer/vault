@@ -43,6 +43,34 @@ export function itemKeyHandle(uuid: string): KeyHandle {
     return `item:${uuid}`;
 }
 
+/**
+ * One item in a bulk open: the wrapped Item Key, and the payload it opens.
+ *
+ * Both halves travel together because they are only ever useful together, and
+ * sending them as one unit is what collapses two round trips per item into one
+ * for a whole batch. The Item Key is unwrapped, used and zeroised inside the
+ * Worker without ever being stored under a handle — nothing needs it again,
+ * since every write generates a fresh one.
+ */
+export interface BulkOpenItem {
+    /** The Vault Key handle the Item Key is wrapped under. */
+    using: KeyHandle;
+    wrapped: Uint8Array;
+    keyAad: AadParams;
+    envelope: Uint8Array;
+    payloadAad: AadParams;
+}
+
+/**
+ * Per-item success or failure.
+ *
+ * A batch never fails as a whole for a reason belonging to one item: one
+ * unreadable secret must not blank out the twenty beside it, and a batch that
+ * threw would make the batch size visible in the interface as a difference in
+ * behaviour.
+ */
+export type BulkOpenResult = { ok: true; bytes: Uint8Array } | { ok: false; error: SerialisedError };
+
 export type Request =
     | {
           op: 'unlock';
@@ -82,6 +110,16 @@ export type Request =
     | { op: 'status' }
     | { op: 'seal'; handle: KeyHandle; plaintext: Uint8Array; aad: AadParams }
     | { op: 'open'; handle: KeyHandle; envelope: Uint8Array; aad: AadParams }
+    /*
+     | Bulk decryption, and the reason opening a large vault is bearable.
+     |
+     | Every postMessage is a structured clone plus a task-queue hop, so a
+     | thousand secrets opened one at a time is four thousand crossings of the
+     | Worker boundary — and the cost of the crossings dwarfs the cost of the
+     | XChaCha20 itself. One request per batch makes the boundary a rounding
+     | error and leaves the measured time where it belongs, in the cipher.
+     */
+    | { op: 'openMany'; items: BulkOpenItem[] }
     | { op: 'unwrapInto'; handle: KeyHandle; using: KeyHandle; wrapped: Uint8Array; aad: AadParams }
     /*
      | The item-key operations. Between them they build and walk the lower half
@@ -98,9 +136,11 @@ export type ResponseFor<R extends Request['op']> = R extends 'status'
     ? { unlocked: boolean; handles: KeyHandle[] }
     : R extends 'seal' | 'open' | 'wrapFrom' | 'sealToPublicKey'
       ? { bytes: Uint8Array }
-      : R extends 'beginUnlock'
-        ? { authKey: Uint8Array }
-        : Record<string, never>;
+      : R extends 'openMany'
+        ? { results: BulkOpenResult[] }
+        : R extends 'beginUnlock'
+          ? { authKey: Uint8Array }
+          : Record<string, never>;
 
 export interface Envelope<T> {
     /** Correlates a response with its request. */

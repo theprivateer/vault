@@ -6,6 +6,7 @@ use App\Enums\VaultRole;
 use App\Http\Requests\StoreVaultRequest;
 use App\Http\Requests\UpdateItemRequest;
 use App\Models\Lockbox;
+use App\Models\Secret;
 use App\Models\Vault;
 use App\Models\VaultMembership;
 use Illuminate\Http\RedirectResponse;
@@ -44,6 +45,17 @@ class VaultController extends Controller
         return Inertia::render('vaults/Index', ['vaults' => $vaults]);
     }
 
+    /**
+     * The whole vault: every lockbox and every secret in it, as ciphertext.
+     *
+     * Sending all of it looks profligate next to a paginated list, and it is
+     * the direct consequence of D5. Search runs in the browser because the
+     * server cannot read a name, so the browser needs the material to search —
+     * a page of results the server chose would either mean the server can
+     * read them, or mean the results are wrong. Phase 4 measures the ceiling
+     * this puts on vault size rather than guessing at it; the numbers are in
+     * docs/06-testing-and-ci.md.
+     */
     public function show(Request $request, Vault $vault): Response
     {
 
@@ -51,12 +63,20 @@ class VaultController extends Controller
             ->withCount('secrets')
             ->orderBy('sort_order')
             ->orderBy('uuid')
+            ->get();
+
+        $secrets = Secret::query()
+            ->whereIn('lockbox_id', $lockboxes->modelKeys())
+            ->with(['lockbox', 'linkedLockbox'])
+            ->orderBy('sort_order')
+            ->orderBy('uuid')
             ->get()
-            ->map(fn (Lockbox $lockbox): array => $lockbox->toClientArray());
+            ->map(fn (Secret $secret): array => $secret->toClientArray());
 
         return Inertia::render('vaults/Show', [
             'vault' => $vault->toClientArray($this->membershipFor($vault, $request)),
-            'lockboxes' => $lockboxes,
+            'lockboxes' => $lockboxes->map(fn (Lockbox $lockbox): array => $lockbox->toClientArray()),
+            'secrets' => $secrets,
         ]);
     }
 

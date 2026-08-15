@@ -12,13 +12,30 @@
  * the substitution the binding exists to detect (SR4).
  */
 import type { AadContext, AadParams } from '@/crypto/aad';
+import { MalformedEnvelopeError } from '@/crypto/errors';
+import { pad, unpad } from '@/crypto/padding';
 import type { CryptoClient } from '@/crypto/worker/client';
+import type { BulkOpenItem } from '@/crypto/worker/protocol';
 import { USER_KEY, X25519_KEY, itemKeyHandle, vaultKeyHandle } from '@/crypto/worker/protocol';
 
 import { decodeUtf8, encodeUtf8, fromBase64, toBase64 } from './bytes';
 
 /** The schema version of the JSON inside a payload. Bound into its AAD. */
-export const PAYLOAD_VERSION = 1;
+export const PAYLOAD_VERSION = 2;
+
+/**
+ * The version at which payloads started being padded to bucket sizes.
+ *
+ * Padding is not a schema change to the JSON, but it is a change to how the
+ * plaintext is framed, and there is no safe way to detect it after the fact:
+ * a v1 payload run through `unpad` would either throw or, worse, silently
+ * truncate a secret whose last byte happened to be `0x80`. Versioning it makes
+ * the reader's decision explicit, and the version is already bound into the
+ * AAD, so a server cannot relabel a v2 payload as v1 to get the old handling.
+ *
+ * v1 payloads are read, never written. Any item saved by this build is v2.
+ */
+export const PADDED_FROM_VERSION = 2;
 
 /**
  * Key wrappings carry their own version, fixed at 1.
@@ -85,6 +102,14 @@ export interface LockboxRecord extends EncryptedItem {
 }
 
 export interface SecretRecord extends EncryptedItem {
+    /** Which lockbox holds it — needed to group a whole vault client-side. */
+    lockboxUuid: string;
+    /**
+     * The optimistic-concurrency token, sent back with an update. The server
+     * refuses the write if it has moved on, rather than overwriting whatever
+     * someone else saved in the meantime.
+     */
+    version: number;
     sortOrder: number;
     linkedLockboxUuid: string | null;
     updatedAt: string | null;
@@ -137,6 +162,33 @@ export async function openVaultKey(client: CryptoClient, vault: VaultRecord): Pr
 }
 
 /**
+ * Describes one item to the Worker's bulk-open operation.
+ *
+ * This is where the client's exclusive authorship of associated data actually
+ * lives: both AADs are built here from the record's own UUID, and the server's
+ * response contributes nothing but ciphertext and identifiers (SR4).
+ */
+export function bulkOpenItem(vaultUuid: string, context: AadContext, item: EncryptedItem): BulkOpenItem {
+    return {
+        using: vaultKeyHandle(vaultUuid),
+        wrapped: fromBase64(item.wrappedItemKey),
+        keyAad: aad('item.key', item.uuid, KEY_WRAP_VERSION),
+        envelope: fromBase64(item.payloadCt),
+        payloadAad: aad(context, item.uuid, item.payloadVersion),
+    };
+}
+
+/**
+ * Turns verified plaintext back into an object, removing padding if the
+ * declared version says there is any.
+ */
+export function parsePayload<T>(plaintext: Uint8Array, payloadVersion: number): T {
+    const json = payloadVersion >= PADDED_FROM_VERSION ? unpad(plaintext) : plaintext;
+
+    return JSON.parse(decodeUtf8(json)) as T;
+}
+
+/**
  * Decrypts one item under a vault key already held.
  *
  * Throws on any failure, and the caller must show that failure rather than an
@@ -149,22 +201,17 @@ export async function openItem<T>(
     context: AadContext,
     item: EncryptedItem,
 ): Promise<T> {
-    const handle = itemKeyHandle(item.uuid);
+    const [result] = await client.openMany([bulkOpenItem(vaultUuid, context, item)]);
 
-    await client.unwrapInto({
-        handle,
-        using: vaultKeyHandle(vaultUuid),
-        wrapped: fromBase64(item.wrappedItemKey),
-        aad: aad('item.key', item.uuid, KEY_WRAP_VERSION),
-    });
+    if (!result) {
+        throw new MalformedEnvelopeError('The worker returned no result for this item.');
+    }
 
-    const plaintext = await client.open(
-        handle,
-        fromBase64(item.payloadCt),
-        aad(context, item.uuid, item.payloadVersion),
-    );
+    if (!result.ok) {
+        throw result.error;
+    }
 
-    return JSON.parse(decodeUtf8(plaintext)) as T;
+    return parsePayload<T>(result.bytes, item.payloadVersion);
 }
 
 /**
@@ -174,6 +221,11 @@ export async function openItem<T>(
  * across two versions of a payload would encrypt two plaintexts under one key,
  * and would leave a rotated secret readable by anyone who had captured the old
  * key.
+ *
+ * The JSON is padded to a bucket size before it is sealed, so the stored length
+ * says which bucket rather than how many characters. Padding inside the AEAD
+ * rather than around it means the padding is covered by the tag: a server
+ * cannot restore the original length by trimming it back off.
  */
 export async function sealItem(
     client: CryptoClient,
@@ -188,7 +240,7 @@ export async function sealItem(
 
     const payloadCt = await client.seal(
         handle,
-        encodeUtf8(JSON.stringify(payload)),
+        pad(encodeUtf8(JSON.stringify(payload))),
         aad(context, uuid, PAYLOAD_VERSION),
     );
 
@@ -197,6 +249,13 @@ export async function sealItem(
         vaultKeyHandle(vaultUuid),
         aad('item.key', uuid, KEY_WRAP_VERSION),
     );
+
+    /*
+     | The Item Key has no further use — the next write generates another one —
+     | so it is dropped rather than left in the keyring for the rest of the
+     | session. Bulk opens never store one at all.
+     */
+    await client.forget(handle);
 
     return {
         payload_ct: toBase64(payloadCt),
