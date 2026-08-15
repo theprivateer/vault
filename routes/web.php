@@ -6,8 +6,12 @@ use App\Http\Controllers\Auth\RecoveryController;
 use App\Http\Controllers\Auth\RegisterController;
 use App\Http\Controllers\Auth\TotpController;
 use App\Http\Controllers\LockboxController;
+use App\Http\Controllers\PinStoreController;
 use App\Http\Controllers\SecretController;
+use App\Http\Controllers\UserIdentityController;
 use App\Http\Controllers\VaultController;
+use App\Http\Controllers\VaultMembershipController;
+use App\Http\Controllers\VaultRekeyController;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
@@ -75,6 +79,51 @@ Route::middleware('auth')->group(function (): void {
     Route::delete('/vaults/{vault}', [VaultController::class, 'destroy'])
         ->middleware('can:delete,vault')
         ->name('vaults.destroy');
+
+    /*
+     | Sharing (Phase 5).
+     |
+     | Granting and re-keying are administrator abilities rather than write
+     | abilities: an editor may change what is in the vault, but handing a copy
+     | of the Vault Key to somebody new is a power of a different kind, because
+     | it cannot be taken back — see the note on rotation in
+     | docs/03-cryptographic-design.md#revocation-and-rotation.
+     */
+    Route::post('/vaults/{vault}/memberships', [VaultMembershipController::class, 'store'])
+        ->middleware('can:share,vault')
+        ->name('memberships.store');
+
+    Route::middleware('can:rekey,vault')->group(function (): void {
+        Route::get('/vaults/{vault}/rekey', [VaultRekeyController::class, 'create'])
+            ->name('vaults.rekey');
+        Route::post('/vaults/{vault}/rekey', [VaultRekeyController::class, 'store'])
+            ->name('vaults.rekey.store');
+    });
+
+    /*
+     | Accepting is the recipient's, revoking is an administrator's, and the two
+     | are different abilities on the same row rather than one "manage
+     | membership" permission — only the recipient can have compared the
+     | granter's fingerprint.
+     */
+    Route::patch('/memberships/{membership}', [VaultMembershipController::class, 'accept'])
+        ->middleware('can:accept,membership')
+        ->name('memberships.accept');
+
+    Route::delete('/memberships/{membership}', [VaultMembershipController::class, 'revoke'])
+        ->middleware('can:revoke,membership')
+        ->name('memberships.revoke');
+
+    /*
+     | The directory lookup that sharing starts from. Rate limited because it
+     | confirms whether a handle exists — accepted leakage within an invited
+     | group (D11), but not something to leave open to a sweep.
+     */
+    Route::get('/users/{handle}/identity', [UserIdentityController::class, 'show'])
+        ->middleware('throttle:30,1')
+        ->name('users.identity');
+
+    Route::post('/account/pins', [PinStoreController::class, 'update'])->name('pins.update');
 
     Route::get('/lockboxes/{lockbox}', [LockboxController::class, 'show'])
         ->middleware('can:view,lockbox')

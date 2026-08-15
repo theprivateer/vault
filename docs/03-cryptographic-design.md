@@ -320,6 +320,68 @@ The sealed box is: ephemeral X25519 keypair → `ECDH(eph_sk, recipient_pk)` →
 Stored as `eph_pk ‖ envelope`. Anonymous to the recipient by construction, which is why the
 separate signed grant carries the sender's identity.
 
+#### The grant format
+
+Settled in Phase 5. The signed bytes are canonical JSON with a fixed field order:
+
+```
+"vault:grant:v1" ‖ 0x00 ‖ {"v":1,"vaultUuid":…,"recipientUuid":…,
+                           "recipientFingerprint":…,"role":…,"keyEpoch":…,"grantedAt":…}
+```
+
+Four decisions in that line, each of which closes something:
+
+- **A domain separator.** A self-signature, a grant and (in Phase 7) an audit entry are all
+  Ed25519 signatures by the same key. Without a prefix, one could be replayed as another.
+- **The recipient's fingerprint is inside the signature.** Binding to the account alone would let
+  a server substitute the recipient's public key and replay an otherwise genuine grant against
+  it. Naming the keys means a grant is only valid for the keys it was issued for.
+- **`keyEpoch` is inside it too.** A grant issued before a rotation does not authorise a
+  membership after one.
+- **The exact bytes are stored, not the fields.** `vault_memberships.grant_payload` holds the
+  canonical JSON verbatim, so a future change to the serialisation cannot invalidate signatures
+  already issued. It is deliberately *not* cast to an array on the model: a round trip through
+  `json_decode`/`json_encode` is free to change the escaping of `/` or of non-ASCII, and every
+  such change would turn a valid grant into one no recipient can verify — failing in a way that
+  looks exactly like tampering.
+
+**Verifying a grant is two checks, not one.** The signature proves the granter signed *some*
+grant. Comparing the signed fields against the membership row on offer is what makes it evidence
+about *this* row — otherwise a server holding any genuine grant could staple it to a fabricated
+membership with a role of its choosing. `grantedAt` is excluded from that comparison: it is the
+granter's claim about when they acted, and comparing it would turn clock skew into a tampering
+report.
+
+The server compares the two as well, when a grant is written. That check is worth nothing against
+a malicious server, which would simply skip it; it exists to catch a client that built the grant
+wrong, at the moment the mistake is made rather than weeks later when nobody can say why the
+recipient cannot accept.
+
+#### The pin store
+
+`user_pin_stores.pins_ct` holds `{ [userUuid]: fingerprintHex }`, sealed under the User Key with
+AAD context `user.pins` bound to the owner's own UUID, and padded like an item payload — the
+unpadded length would count how many people you have verified.
+
+The asymmetry that makes this work is worth stating plainly: the server can **forget** a pin and
+cannot **forge** one. Forgetting degrades to a verification prompt, which is safe. Forging would
+mark the server's own substituted key as already trusted, which is the entire attack. Only the
+second is prevented, and only the second needs to be.
+
+The client fails closed to match. A pin store that will not decrypt is not treated as an empty
+one: every identity reports as unverified, so the user is asked to check again rather than told
+everything is fine on the strength of a store nobody could read.
+
+#### The identicon
+
+A fingerprint is also drawn as a 7×7 mirrored grid derived from `BLAKE2b(fingerprint)`, because
+people notice a shape changing and do not reliably compare 24 characters of base32.
+
+**It is an aid, not the check, and the difference is quantitative.** The grid encodes 56 bits, and
+a symmetric grid is a birthday problem, so an attacker willing to grind roughly 2²⁸ keypairs —
+minutes of work — could produce a different identity that draws the same picture. Every place it
+appears therefore shows the characters beside it, and the wording asks the user to compare those.
+
 **Small-order public keys must be rejected.** Ed25519 verification accepts an all-zero signature
 against an all-zero public key, for any message. Without an explicit check, a malicious server
 could publish a degenerate identity whose self-signature verifies — defeating the exact check
@@ -350,6 +412,25 @@ Key. So revocation *is* rotation:
    re-wrapping — milliseconds — versus re-encrypting every payload.
 
 **Stated in the UI:** rotation prevents future access. It cannot retract what was already read.
+
+Three details settled while building it in Phase 5:
+
+- **Trashed items are re-keyed too.** During the 30-day grace period a soft-deleted lockbox or
+  secret is still a row holding an item key wrapped under the *old* Vault Key. Skipping those
+  would quietly turn "deleted, restorable for 30 days" into "deleted", without anyone choosing
+  that. The re-key set therefore includes them, and the endpoint that supplies the set includes
+  trashed rows.
+- **The epoch is compared after the row is locked, not before.** Two owners rotating at once would
+  otherwise both read `key_epoch` as 3, both find it acceptable, and the second would overwrite
+  the first — leaving members holding a Vault Key that no longer wraps anything.
+- **Every remaining member's fingerprint is verified before the rotation runs.** Rotation seals a
+  fresh key to each of them, so a member whose public key was substituted since the last check
+  would be handed the new key *by this operation*. Without that gate, rotation is a delivery
+  mechanism.
+
+"Complete" means exactly complete: nothing missing and nothing extra. A submission naming an item
+that is not in the vault is a client working from a stale picture, and the items it did send are
+then unlikely to be the whole set either.
 
 ### Files
 

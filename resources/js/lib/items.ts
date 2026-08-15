@@ -16,7 +16,7 @@ import { MalformedEnvelopeError } from '@/crypto/errors';
 import { pad, unpad } from '@/crypto/padding';
 import type { CryptoClient } from '@/crypto/worker/client';
 import type { BulkOpenItem } from '@/crypto/worker/protocol';
-import { USER_KEY, X25519_KEY, itemKeyHandle, vaultKeyHandle } from '@/crypto/worker/protocol';
+import { ED25519_KEY, USER_KEY, X25519_KEY, itemKeyHandle, vaultKeyHandle } from '@/crypto/worker/protocol';
 
 import { decodeUtf8, encodeUtf8, fromBase64, toBase64 } from './bytes';
 
@@ -132,17 +132,28 @@ function aad(context: AadContext, subject: string, version: number): AadParams {
  * Called as part of unlocking, so "unlocked" always means the browser can open
  * a sealed vault key — rather than a second state where the User Key is present
  * but nothing can actually be read.
+ *
+ * Both keys, not just X25519. The Ed25519 key signs membership grants, and an
+ * unlocked session that could receive a shared vault but not share one would be
+ * a distinction with no use and plenty of room for a bug.
  */
 export async function loadIdentity(
     client: CryptoClient,
     userUuid: string,
-    x25519PrivateKeyCt: string,
+    identity: { x25519PrivateKeyCt: string; ed25519PrivateKeyCt: string },
 ): Promise<void> {
     await client.unwrapInto({
         handle: X25519_KEY,
         using: USER_KEY,
-        wrapped: fromBase64(x25519PrivateKeyCt),
+        wrapped: fromBase64(identity.x25519PrivateKeyCt),
         aad: aad('user.privkey.x25519', userUuid, KEY_WRAP_VERSION),
+    });
+
+    await client.unwrapInto({
+        handle: ED25519_KEY,
+        using: USER_KEY,
+        wrapped: fromBase64(identity.ed25519PrivateKeyCt),
+        aad: aad('user.privkey.ed25519', userUuid, KEY_WRAP_VERSION),
     });
 }
 

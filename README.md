@@ -77,8 +77,8 @@ Read in this order:
 
 ## Status
 
-Phases 0–4 of [thirteen](docs/05-implementation-plan.md) are complete: a working single-user
-zero-knowledge vault.
+Phases 0–5 of [thirteen](docs/05-implementation-plan.md) are complete: a working zero-knowledge
+vault that can be shared with other people and taken back.
 
 - **Phase 0** — Inertia + Vue + TypeScript strict, a nonce-based CSP enforced from the first
   render, static analysis at maximum, CI gating every check.
@@ -92,9 +92,12 @@ zero-knowledge vault.
   Worker, client-side search, payload padding, optimistic writes with concurrent-edit detection,
   and the scale ceiling measured rather than guessed at.
 
-Next is [Phase 5](docs/05-implementation-plan.md#phase-5--sharing-membership--revocation): sharing
-by fingerprint-verified grant, and re-keying a vault on revocation. The hardest phase, and the one
-where the asymmetric layer earns its place.
+- **Phase 5** — sharing by signed grant, trust-on-first-use fingerprint pinning with a hard stop
+  when a key changes, and revocation that triggers an atomic re-key. The phase where the
+  asymmetric layer earns its place.
+
+Next is [Phase 6](docs/05-implementation-plan.md#phase-6--encrypted-file-attachments): encrypted
+file attachments, chunked, with truncation and reorder failing closed.
 
 ## Stack
 

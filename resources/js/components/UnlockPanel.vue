@@ -35,7 +35,7 @@ async function submit(): Promise<void> {
     }
 
     try {
-        await unlock(password.value, bundle, page.props.auth.identity);
+        await unlock(password.value, bundle, page.props.auth.identity, page.props.auth.pins);
         password.value = '';
     } catch (error) {
         /*

@@ -49,4 +49,33 @@ class VaultPolicy
             ? Response::allow()
             : Response::denyAsNotFound();
     }
+
+    /**
+     * Granting access to somebody else.
+     *
+     * Administrators only — an editor may change what is in the vault, but not
+     * who can read it. The two are genuinely different powers: content can be
+     * corrected, and a copy of the Vault Key handed to a stranger cannot be
+     * taken back (see `rekey`).
+     */
+    public function share(User $user, Vault $vault): Response
+    {
+        return $vault->roleFor($user)?->canAdminister() === true
+            ? Response::allow()
+            : Response::denyAsNotFound();
+    }
+
+    /**
+     * Rotating the Vault Key, which is the second half of revocation.
+     *
+     * Restricted to administrators for the same reason as `share`, and because a
+     * re-key rewrites every wrapped key in the vault: a client that got it wrong
+     * would leave members holding keys that open nothing.
+     */
+    public function rekey(User $user, Vault $vault): Response
+    {
+        return $vault->roleFor($user)?->canAdminister() === true
+            ? Response::allow()
+            : Response::denyAsNotFound();
+    }
 }

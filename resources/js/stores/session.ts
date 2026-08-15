@@ -21,6 +21,8 @@ import type { KdfParams } from '@/crypto/primitives';
 import { fromBase64 } from '@/lib/bytes';
 import { describeError } from '@/lib/errors';
 import { loadIdentity } from '@/lib/items';
+import { notifyLock } from './lock';
+import { load as loadPins, type PinStoreRecord } from './pins';
 
 export type SessionStatus = 'anonymous' | 'locked' | 'unlocked';
 
@@ -42,7 +44,9 @@ export interface UnlockBundle {
  */
 export interface IdentityBundle {
     x25519PublicKey: string;
+    ed25519PublicKey: string;
     x25519PrivateKeyCt: string;
+    ed25519PrivateKeyCt: string;
     fingerprint: string;
 }
 
@@ -61,26 +65,11 @@ let idleTimer: ReturnType<typeof setTimeout> | null = null;
 let detach: (() => void) | null = null;
 
 /**
- * Anything holding decrypted data, to be told the moment it stops being
- * allowed to.
- *
- * Deliberately a synchronous callback list rather than a watcher on the
- * reactive status. A Vue watcher fires on the next tick, and "the plaintext is
- * gone" must not be true one tick after the user asked for it — between those
- * two moments a screenshot, a devtools snapshot or a render still has the
- * secrets in it. Locking calls these before it returns.
+ * Re-exported so that `onLock` still reads as part of the session's contract at
+ * every call site, while the registry itself lives in `lock.ts` — see the note
+ * there on why it cannot live in this module.
  */
-const lockListeners = new Set<() => void>();
-
-/**
- * Registers a listener to be called synchronously on every lock. Returns a
- * function that removes it.
- */
-export function onLock(listener: () => void): () => void {
-    lockListeners.add(listener);
-
-    return () => lockListeners.delete(listener);
-}
+export { onLock } from './lock';
 
 /** Test seam: lets a suite supply a client that does not spawn a real Worker. */
 let createClient: () => CryptoClient = () => new CryptoClient();
@@ -155,6 +144,7 @@ export async function unlock(
     password: string,
     bundle: UnlockBundle,
     identity: IdentityBundle | null,
+    pins: PinStoreRecord | null = null,
 ): Promise<void> {
     state.unlocking = true;
 
@@ -171,7 +161,22 @@ export async function unlock(
         });
 
         if (identity) {
-            await loadIdentity(client, bundle.userKeyAad.subject, identity.x25519PrivateKeyCt);
+            await loadIdentity(client, bundle.userKeyAad.subject, identity);
+        }
+
+        /*
+         | Loaded here rather than lazily by whichever page needs it first, so
+         | that "unlocked" means every trust decision can be made. A share
+         | screen that rendered before the pin store arrived would show
+         | "unverified" for someone already verified — which trains people to
+         | click through the prompt that is supposed to stop them.
+         |
+         | It never throws: a store that will not open is recorded as a failure
+         | inside the pins store and reported as "verify everything again",
+         | which must not be able to prevent an unlock.
+         */
+        if (pins) {
+            await loadPins(client, bundle.userKeyAad.subject, pins);
         }
 
         state.status = 'unlocked';
@@ -192,9 +197,7 @@ export function lock(reason: LockReason = 'manual'): void {
      | holds plaintext while the interface already says "locked" — and before
      | this function returns, so `lock()` really does mean it.
      */
-    for (const listener of lockListeners) {
-        listener();
-    }
+    notifyLock();
 
     if (state.status !== 'anonymous') {
         state.status = 'locked';
@@ -255,9 +258,7 @@ export function resetSession(): void {
     client?.terminate();
     client = null;
 
-    for (const listener of lockListeners) {
-        listener();
-    }
+    notifyLock();
 
     state.status = 'anonymous';
     state.lockReason = null;

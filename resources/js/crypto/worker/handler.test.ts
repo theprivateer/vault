@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { AadParams } from '../aad';
 import { InvalidParameterError } from '../errors';
+import { verifyGrant } from '../grant';
 import { deriveFromPassword, generateKdfSalt, generateKey, wrapKey } from '../keys';
 import { utf8ToBytes } from '../primitives';
 import type { Handler, WorkerScope } from './handler';
@@ -9,7 +10,7 @@ import { createHandler, installHandler, serialiseError } from './handler';
 import type { RegistrationResult } from './keyring';
 import { Keyring } from './keyring';
 import type { Reply, Request } from './protocol';
-import { USER_KEY, X25519_KEY } from './protocol';
+import { ED25519_KEY, USER_KEY, X25519_KEY } from './protocol';
 
 const FAST_KDF = { m: 8, t: 1, p: 1 };
 const SUBJECT = '0192f3a1-4b2c-7d3e-8f90-a1b2c3d4e5f6';
@@ -186,6 +187,41 @@ describe('item key operations', () => {
                 aad: itemAad,
             }),
         ).toThrow(InvalidParameterError);
+    });
+
+    it('signs a grant and returns the exact bytes it signed', () => {
+        const handler = createHandler();
+
+        const registration = handler({
+            op: 'register',
+            password: PASSWORD,
+            kdfSalt: generateKdfSalt(),
+            kdfParams: FAST_KDF,
+            uuid: SUBJECT,
+        }) as RegistrationResult;
+
+        handler({
+            op: 'unwrapInto',
+            handle: ED25519_KEY,
+            using: USER_KEY,
+            wrapped: registration.ed25519PrivateKeyCt,
+            aad: { context: 'user.privkey.ed25519', subject: SUBJECT, version: 1 },
+        });
+
+        const grant = {
+            vaultUuid: SUBJECT,
+            recipientUuid: '0192f3a1-4b2c-7d3e-8f90-a1b2c3d4e5aa',
+            recipientFingerprint: 'c'.repeat(64),
+            role: 'viewer' as const,
+            keyEpoch: 1,
+            grantedAt: '2026-08-15T09:00:00Z',
+        };
+
+        const signed = handler({ op: 'signGrant', grant }) as { payload: string; signature: Uint8Array };
+
+        expect(
+            verifyGrant(signed.signature, signed.payload, registration.ed25519PublicKey, grant),
+        ).toMatchObject({ valid: true });
     });
 });
 

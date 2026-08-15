@@ -12,6 +12,7 @@
  * docs/02-threat-model.md.
  */
 import type { AadParams } from '../aad';
+import type { Grant } from '../grant';
 import type { KdfParams } from '../primitives';
 
 /**
@@ -130,6 +131,17 @@ export type Request =
     | { op: 'wrapFrom'; handle: KeyHandle; using: KeyHandle; aad: AadParams }
     | { op: 'sealToPublicKey'; handle: KeyHandle; recipientPublicKey: Uint8Array; aad: AadParams }
     | { op: 'openSealedInto'; handle: KeyHandle; using: KeyHandle; sealed: Uint8Array; aad: AadParams }
+    /*
+     | Signs a membership grant with the held Ed25519 key.
+     |
+     | Deliberately not a general "sign these bytes" operation. A signing oracle
+     | over arbitrary input would let injected script obtain the user's signature
+     | on anything the format ever grows to cover — a future audit entry, an
+     | identity rotation — from a single foothold. This op takes a grant and
+     | applies the grant domain separator itself, so the only statement the
+     | Worker will ever sign is one whose shape is known here.
+     */
+    | { op: 'signGrant'; grant: Grant }
     | { op: 'forget'; handle: KeyHandle };
 
 export type ResponseFor<R extends Request['op']> = R extends 'status'
@@ -140,7 +152,9 @@ export type ResponseFor<R extends Request['op']> = R extends 'status'
         ? { results: BulkOpenResult[] }
         : R extends 'beginUnlock'
           ? { authKey: Uint8Array }
-          : Record<string, never>;
+          : R extends 'signGrant'
+            ? { payload: string; signature: Uint8Array }
+            : Record<string, never>;
 
 export interface Envelope<T> {
     /** Correlates a response with its request. */

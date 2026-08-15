@@ -26,6 +26,27 @@ export function fromBase64(value: string): Uint8Array {
     return bytes;
 }
 
+/**
+ * Hex, for fingerprints.
+ *
+ * Fingerprints travel as hex rather than base64 because they are compared by
+ * eye and quoted in grants, where a single canonical spelling matters more than
+ * a third fewer characters — base64 has variants, and hex has one.
+ */
+export function fromHex(value: string): Uint8Array {
+    if (value.length % 2 !== 0 || !/^[0-9a-f]*$/.test(value)) {
+        throw new Error(`Expected lowercase hex with an even length, received: ${value}`);
+    }
+
+    const bytes = new Uint8Array(value.length / 2);
+
+    for (let i = 0; i < bytes.length; i++) {
+        bytes[i] = Number.parseInt(value.slice(i * 2, i * 2 + 2), 16);
+    }
+
+    return bytes;
+}
+
 export function encodeUtf8(value: string): Uint8Array {
     return new TextEncoder().encode(value);
 }

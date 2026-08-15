@@ -8,25 +8,42 @@
  * rather than assumed — see the scale ceiling in docs/06-testing-and-ci.md —
  * and it is shown to the user as progress rather than hidden behind a spinner.
  */
-import { Head, Link, router } from '@inertiajs/vue3';
+import { Head, Link, router, usePage } from '@inertiajs/vue3';
 import { computed, ref, watch } from 'vue';
 
 import NoticePanel from '@/components/NoticePanel.vue';
+import ShareVault from '@/components/ShareVault.vue';
 import TextField from '@/components/TextField.vue';
 import AppLayout from '@/layouts/AppLayout.vue';
+import { fingerprintHex } from '@/crypto/grant';
+import { computeFingerprint } from '@/crypto/identity';
+import { fromBase64 } from '@/lib/bytes';
 import { describeError } from '@/lib/errors';
 import { sealItem, type LockboxRecord, type SecretRecord, type VaultRecord } from '@/lib/items';
+import { checkMembership, type MembershipRecord } from '@/lib/sharing';
 import { uuid7 } from '@/lib/uuid';
+import { usePins } from '@/stores/pins';
 import { useSession } from '@/stores/session';
 import { useVaultContents } from '@/stores/vault';
+
+/** The public halves of the signed-in user's own identity. */
+interface OwnIdentity {
+    ed25519PublicKey: string;
+    x25519PublicKey: string;
+}
 
 const props = defineProps<{
     vault: VaultRecord;
     lockboxes: LockboxRecord[];
     secrets: SecretRecord[];
+    members: MembershipRecord[];
+    rekeyRequiredAt: string | null;
 }>();
 
+const page = usePage<{ auth: { user: { uuid: string } | null; identity: OwnIdentity | null } }>();
+
 const { isUnlocked, crypto } = useSession();
+const { state: pins } = usePins();
 const { contents, busy, failure, progress, showProgress, openContents, secretsIn } = useVaultContents();
 
 const creating = ref(false);
@@ -35,6 +52,62 @@ const description = ref('');
 const createFailure = ref('');
 
 const canWrite = computed(() => props.vault.membership.role !== 'viewer');
+const isOwner = computed(() => props.vault.membership.role === 'owner');
+
+/**
+ * This user's own fingerprint, recomputed from their own keys.
+ *
+ * Recomputed rather than read from `identity.fingerprint`, because that field is
+ * the server's cache of it — and a grant is checked against the fingerprint it
+ * names, so taking the server's word here would let a substituted key satisfy
+ * its own grant.
+ */
+const ownFingerprint = computed(() => {
+    const identity = page.props.auth.identity;
+
+    if (!identity) {
+        return '';
+    }
+
+    return fingerprintHex(
+        computeFingerprint(fromBase64(identity.ed25519PublicKey), fromBase64(identity.x25519PublicKey)),
+    );
+});
+
+/**
+ * Whether the grant that gave *this* user access holds up.
+ *
+ * A membership row is something the server writes, so a vault appearing in
+ * someone's list is not by itself evidence that anybody shared it with them.
+ * The signature is the evidence, and until it verifies against a pinned key the
+ * vault renders with a warning above it rather than as an ordinary vault.
+ *
+ * The owner's own membership is exempt: they created the vault, and there is
+ * nobody else whose signature could be on it.
+ */
+const ownMembership = computed(
+    () => props.members.find((membership) => membership.uuid === props.vault.membership.uuid) ?? null,
+);
+
+const trust = computed(() => {
+    const membership = ownMembership.value;
+
+    if (isOwner.value || membership === null || !ownFingerprint.value) {
+        return null;
+    }
+
+    return checkMembership(membership, ownFingerprint.value, props.vault.uuid, pins.pins);
+});
+
+const unverifiedGrant = computed(() => (trust.value?.trusted === false ? trust.value : null));
+
+function acceptGrant(): void {
+    const membership = ownMembership.value;
+
+    if (membership) {
+        router.patch(`/memberships/${membership.uuid}`, {}, { preserveScroll: true });
+    }
+}
 
 const openedLockboxes = computed(() => contents.value.lockboxes);
 const percent = computed(() =>
@@ -105,6 +178,53 @@ function destroy(): void {
         <Head :title="contents.vault?.payload?.name ?? 'Vault'" />
 
         <Link href="/vaults" class="text-2xs text-muted hover:text-ink">&larr; all vaults</Link>
+
+        <!--
+            A membership row is written by the server, so a vault appearing in
+            your list is not evidence anyone shared it with you. The signature
+            is. Until it verifies, this renders as a warning above the vault
+            rather than as an ordinary vault.
+        -->
+        <NoticePanel
+            v-if="unverifiedGrant"
+            tone="accent"
+            heading="this share cannot be verified"
+            class="mt-4"
+        >
+            <p>{{ unverifiedGrant.detail }}</p>
+            <p class="mt-3">
+                You can still read what is here — you hold the key — but nothing shows who gave it to you.
+                Confirm with them directly before trusting anything in it.
+            </p>
+        </NoticePanel>
+
+        <NoticePanel
+            v-else-if="trust?.trusted && !ownMembership?.acceptedAt"
+            heading="verified share"
+            class="mt-4"
+        >
+            <p>Signed by {{ ownMembership?.grantedBy?.displayName }}, whose keys you have verified.</p>
+            <button type="button" class="btn mt-4" @click="acceptGrant">acknowledge</button>
+        </NoticePanel>
+
+        <!--
+            Only an owner is prompted: rotating means unwrapping every item key,
+            and re-sealing the new one to each remaining member.
+        -->
+        <NoticePanel
+            v-if="rekeyRequiredAt && isOwner"
+            tone="accent"
+            heading="this vault needs a new key"
+            class="mt-4"
+        >
+            <p>
+                Someone was removed. Until you rotate the key, anything written from now on is still encrypted
+                under a key they may have cached.
+            </p>
+            <Link :href="`/vaults/${props.vault.uuid}/rekey`" class="btn mt-4 inline-block">
+                re-key this vault
+            </Link>
+        </NoticePanel>
 
         <NoticePanel v-if="failure" tone="accent" heading="this vault could not be opened" class="mt-4">
             {{ failure }}
@@ -187,5 +307,12 @@ function destroy(): void {
         </div>
 
         <p v-else-if="!failure && !busy" class="mt-6 text-sm text-muted">No lockboxes in this vault yet.</p>
+
+        <ShareVault
+            v-if="isOwner && page.props.auth.user"
+            :vault="props.vault"
+            :members="members"
+            :own-uuid="page.props.auth.user.uuid"
+        />
     </AppLayout>
 </template>

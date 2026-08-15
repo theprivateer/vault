@@ -11,6 +11,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Carbon;
 
 /**
  * A vault: the unit of sharing, and the root of one key hierarchy.
@@ -25,6 +26,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * @property Ciphertext $wrapped_item_key
  * @property int $payload_version
  * @property int $key_epoch
+ * @property ?Carbon $rekey_required_at
  */
 class Vault extends Model
 {

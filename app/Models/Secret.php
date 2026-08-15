@@ -19,6 +19,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * which are SSH keys, and that is a targeting signal worth nothing to us and
  * quite a lot to an attacker.
  *
+ * @property int $id
  * @property string $uuid
  * @property Ciphertext $payload_ct
  * @property Ciphertext $wrapped_item_key

@@ -66,6 +66,18 @@ class HandleInertiaRequests extends Middleware
                  | box addressed to that X25519 key.
                  */
                 'identity' => $user instanceof User ? $user->identity?->toOwnerBundle() : null,
+
+                /*
+                 | The encrypted record of whose public keys this user has
+                 | verified, alongside the identity it is opened with.
+                 |
+                 | Shared rather than fetched per page because every fingerprint
+                 | decision is made against it, and a page that rendered a
+                 | "verified" badge before the store arrived would be showing an
+                 | answer it did not have yet. A null blob means nobody has been
+                 | verified, which is a real state and not an error.
+                 */
+                'pins' => $user instanceof User ? $user->pinBundle() : null,
             ],
         ];
     }

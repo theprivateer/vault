@@ -1,6 +1,7 @@
 ---
 paths:
   - 'resources/js/stores/**'
+  - resources/js/stores/lock.ts
 ---
 
 # Stores
@@ -13,3 +14,8 @@ Every decrypt run captures a `generation` number. A run that was in flight when 
 Opening a different vault wipes first, so a stale entry cannot surface in a search result for a vault the user has navigated away from.
 
 Pinia is deliberately not used — the wiping and fencing are the hard parts and no store library does them.
+
+## The lock signal lives in its own module to break an import cycle
+`stores/lock.ts` holds only `onLock`/`notifyLock`. It is separate because `session.ts` loads the pins store on unlock while `pins.ts` and `vault.ts` subscribe to lock — together in one module that is a cycle, and not a stylistic one: subscribers call `onLock` during module evaluation, so whichever loaded second would reach a binding that does not exist yet and fail at start-up.
+
+`session.ts` re-exports `onLock` so call sites still read as part of the session contract. Import it from either; do not move the registry back.

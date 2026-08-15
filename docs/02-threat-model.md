@@ -95,8 +95,18 @@ The server necessarily learns:
   than a credential. Padding to one fixed size would close it completely and would make every
   password cost as much to store as a document; the buckets are the compromise. Files are not
   padded, and their sizes leak.
-- **Membership** — who shares a vault with whom, and when access was granted or revoked. This is
-  social-graph information and it is not hidden.
+- **Membership** — who shares a vault with whom, with what role, and when access was granted or
+  revoked. This is social-graph information and it is not hidden. Two parts of it are visible
+  because they have to be: `grant_payload` is plaintext, since the recipient must read the bytes
+  their signature covers, and it names the vault, the recipient, the role and the key epoch; and
+  a `key_epoch` that advances tells the server a vault was re-keyed, which usually means somebody
+  was removed. The one thing that is *not* visible is who a user has verified out of band — the
+  pin store is encrypted under the User Key, because a server that could read it would know which
+  key substitutions would go unnoticed, and one that could write it could mark its own key as
+  already trusted.
+- **Handles** — the identity directory confirms whether a handle exists to any signed-in user.
+  Sharing by handle requires exactly that lookup, and D11 scopes the system to a small invited
+  group where the member list is not the secret.
 - **Access patterns** — which item was fetched and when, from the request log and audit log.
 - **IP addresses and user agents** — in web server logs. Application logs store a salted hash of
   the IP rather than the address itself.

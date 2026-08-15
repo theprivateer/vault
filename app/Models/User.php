@@ -88,6 +88,16 @@ class User extends Authenticatable
     }
 
     /**
+     * The encrypted record of whose public keys this user has verified.
+     *
+     * @return HasOne<UserPinStore, $this>
+     */
+    public function pinStore(): HasOne
+    {
+        return $this->hasOne(UserPinStore::class);
+    }
+
+    /**
      * @return HasMany<TotpBackupCode, $this>
      */
     public function backupCodes(): HasMany
@@ -150,6 +160,27 @@ class User extends Authenticatable
                 'version' => 1,
             ],
         ];
+    }
+
+    /**
+     * The encrypted list of identities this user has verified, and its version.
+     *
+     * A user who has verified nobody has no row, which is an empty store rather
+     * than an error — but the distinction matters at the other end: the client
+     * treats "no store" as "nothing verified yet" and "store that would not
+     * open" as "verify everything again". Only one of those is safe to guess at.
+     *
+     * @return array{pinsCt: ?string, version: int}
+     */
+    public function pinBundle(): array
+    {
+        $store = $this->pinStore;
+
+        if ($store === null) {
+            return ['pinsCt' => null, 'version' => 0];
+        }
+
+        return ['pinsCt' => $store->pins_ct->base64, 'version' => $store->version];
     }
 
     public function hasTotpEnabled(): bool

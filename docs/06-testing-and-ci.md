@@ -81,6 +81,37 @@ constant — a server reading its own database learns that one credential is a P
 what remains visible is only that the last two are *bigger*, which is the accepted leakage written
 down in [02 § Accepted leakage](02-threat-model.md#accepted-leakage).
 
+### 1b. Sharing, and what each half can prove — Phase 5
+
+Sharing is the one feature whose tests have to be split across two suites, because the two halves
+defend against different things and neither can stand in for the other.
+
+**In Pest** (`tests/Feature/Vault/SharingTest.php`, `RekeyTest.php`, `RoleMatrixTest.php`) —
+everything the server is actually responsible for. That it stores exactly the bytes it was given;
+that revocation cuts access on the *next request*, before any re-key; that a re-key is refused
+unless the set is complete and the epoch is exactly current + 1; and a table with a row per
+(role × action) because role checks are the one part of this system with no cryptographic
+backstop.
+
+**In Vitest** (`resources/js/lib/sharing.test.ts`) — the two exit criteria no server is involved
+in, against real generated keys:
+
+- a grant whose signature was tampered with is rejected by the recipient, and
+- a **substituted public key produces a hard stop**: a bundle that is internally perfect — valid
+  self-signature, matching fingerprint — is caught only by not matching what was pinned.
+
+The second is the interesting one, and its sibling cases are what give it teeth. A genuine grant
+stapled to a row claiming `owner`; a genuine grant replayed against a different vault; a genuine
+grant replayed against a recipient whose keys were swapped after it was issued; a bundle pairing
+one identity's signing key with another's encryption key. All verify as *signatures*. All are
+refused, and each for a different reason.
+
+**What is deliberately not asserted server-side:** that a signature is valid. The server serves
+the public key too, so checking a signature against it would be checking its own work. It compares
+the signed grant with the row for the same reason a compiler warns about unused variables — to
+catch mistakes, not attackers — and that distinction is written into the controller so nobody
+later mistakes it for a security control.
+
 ### 2. AAD binding (SR4) — Phase 1
 
 Seal a payload under record A's associated data; attempt to open it as record B; assert
@@ -104,7 +135,10 @@ degrades by accident — someone adds "remember this vault" and stores the wrong
 - **Feature tests per endpoint.** Every route gets the happy path, the unauthenticated case, the
   unauthorised case and the malformed-input case.
 - **Policy tests, table-driven.** A row per (role × action × resource). Exhaustive, boring,
-  exactly the kind of thing that is skipped and then regretted.
+  exactly the kind of thing that is skipped and then regretted. One trap found while writing it:
+  the actions are not independent when they share a fixture, because `delete vault` succeeds and
+  soft-deletes it, after which every later action answers 404 — which reads exactly like a
+  permission failure and hid most of the row. Each action gets its own fixture.
 - **IDOR suite.** For every resource, user B gets **404** on user A's records. 404 rather than
   403 — a 403 confirms the resource exists.
 - **Validation tests** proving the server accepts only blob shape and size, and that no code path

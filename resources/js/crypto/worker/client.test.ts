@@ -1,13 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import type { AadParams } from '../aad';
+import { verifyGrant } from '../grant';
 import { deriveFromPassword, generateKdfSalt, generateKey, wrapKey } from '../keys';
 import { constantTimeEqual, utf8ToBytes } from '../primitives';
 import { CryptoClient, WORKER_URL, isIntegrityFailure, toCloneable } from './client';
 import type { WorkerScope } from './handler';
 import { installHandler } from './handler';
 import type { Reply, Request } from './protocol';
-import { USER_KEY, X25519_KEY, itemKeyHandle, vaultKeyHandle } from './protocol';
+import { ED25519_KEY, USER_KEY, X25519_KEY, itemKeyHandle, vaultKeyHandle } from './protocol';
 
 const FAST_KDF = { m: 8, t: 1, p: 1 };
 const SUBJECT = '0192f3a1-4b2c-7d3e-8f90-a1b2c3d4e5f6';
@@ -627,6 +628,47 @@ describe('vault keys through the client', () => {
                 aad: { ...wrapAad, subject: UUID },
             }),
         ).rejects.toSatisfy(isIntegrityFailure);
+    });
+
+    /**
+     * The signature and the bytes it covers travel back together, because a
+     * signature verifies against those bytes and no others. Re-serialising the
+     * grant on this side would be a second chance for the two to disagree.
+     */
+    it('signs a grant across the boundary without the identity key crossing back', async () => {
+        const { client } = clientWithWorker();
+
+        const account = await client.register({
+            password: PASSWORD,
+            kdfSalt: generateKdfSalt(),
+            kdfParams: FAST_KDF,
+            uuid: UUID,
+        });
+
+        await client.unwrapInto({
+            handle: ED25519_KEY,
+            using: USER_KEY,
+            wrapped: account.ed25519PrivateKeyCt,
+            aad: { context: 'user.privkey.ed25519', subject: UUID, version: 1 },
+        });
+
+        const grant = {
+            vaultUuid: VAULT_UUID,
+            recipientUuid: '0192f3a1-4b2c-7d3e-8f90-a1b2c3d4e5ab',
+            recipientFingerprint: 'd'.repeat(64),
+            role: 'editor' as const,
+            keyEpoch: 1,
+            grantedAt: '2026-08-15T09:00:00Z',
+        };
+
+        const signed = await client.signGrant(grant);
+
+        expect(verifyGrant(signed.signature, signed.payload, account.ed25519PublicKey, grant)).toMatchObject({
+            valid: true,
+        });
+
+        // Nothing else came back: the signing key stayed on the far side.
+        expect(Object.keys(signed).sort()).toEqual(['payload', 'signature']);
     });
 });
 

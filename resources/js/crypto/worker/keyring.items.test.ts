@@ -15,6 +15,7 @@ import {
     KeyUnavailableError,
     MalformedEnvelopeError,
 } from '../errors';
+import { verifyGrant } from '../grant';
 import { generateKdfSalt, sealTo } from '../keys';
 import { utf8ToBytes } from '../primitives';
 import type { RegistrationResult } from './keyring';
@@ -36,6 +37,7 @@ const aad = (context: AadParams['context'], subject: string): AadParams => ({
 
 const userKeyAad = aad('user.userkey', USER_UUID);
 const x25519Aad = aad('user.privkey.x25519', USER_UUID);
+const ed25519Aad = aad('user.privkey.ed25519', USER_UUID);
 const membershipAad = aad('vault.membership.key', MEMBERSHIP_UUID);
 const itemKeyAad = aad('item.key', VAULT_UUID);
 const payloadAad = aad('vault.payload', VAULT_UUID);
@@ -59,9 +61,18 @@ function openAccount(): { keyring: Keyring; account: Account } {
 
     const registration = keyring.register({ password, kdfSalt, kdfParams: FAST_KDF, uuid: USER_UUID });
 
-    keyring.unwrapInto(X25519_KEY, USER_KEY, registration.x25519PrivateKeyCt, x25519Aad);
+    loadIdentityKeys(keyring, registration);
 
     return { keyring, account: { password, kdfSalt, registration } };
+}
+
+/**
+ * Both private keys, as `loadIdentity` does on a real unlock: X25519 opens
+ * sealed vault keys, Ed25519 signs grants.
+ */
+function loadIdentityKeys(keyring: Keyring, registration: RegistrationResult): void {
+    keyring.unwrapInto(X25519_KEY, USER_KEY, registration.x25519PrivateKeyCt, x25519Aad);
+    keyring.unwrapInto(ED25519_KEY, USER_KEY, registration.ed25519PrivateKeyCt, ed25519Aad);
 }
 
 /** Reopens the same account from scratch, as a fresh page load would. */
@@ -76,7 +87,7 @@ function reopenAccount(account: Account): Keyring {
         userKeyAad,
     });
 
-    keyring.unwrapInto(X25519_KEY, USER_KEY, account.registration.x25519PrivateKeyCt, x25519Aad);
+    loadIdentityKeys(keyring, account.registration);
 
     return keyring;
 }
@@ -120,7 +131,7 @@ describe('the vault key hierarchy', () => {
         const { keyring, account } = openAccount();
         createVault(keyring, account.registration.x25519PublicKey);
 
-        expect(keyring.handles).toEqual([X25519_KEY, ITEM_KEY, USER_KEY, VAULT_KEY].sort());
+        expect(keyring.handles).toEqual([ED25519_KEY, X25519_KEY, ITEM_KEY, USER_KEY, VAULT_KEY].sort());
     });
 
     it('forgets a key on request', () => {
@@ -164,6 +175,42 @@ describe('associated data binding', () => {
         expect(() => keyring.open(ITEM_KEY, stored.payloadCt, aad('secret.payload', VAULT_UUID))).toThrow(
             IntegrityError,
         );
+    });
+});
+
+describe('signing grants', () => {
+    const grant = {
+        vaultUuid: VAULT_UUID,
+        recipientUuid: OTHER_UUID,
+        recipientFingerprint: 'a'.repeat(64),
+        role: 'editor' as const,
+        keyEpoch: 1,
+        grantedAt: '2026-08-15T09:00:00Z',
+    };
+
+    it('signs with the identity key, verifiably by anyone holding the public half', () => {
+        const { keyring, account } = openAccount();
+
+        const { payload, signature } = keyring.signGrant(grant);
+
+        expect(verifyGrant(signature, payload, account.registration.ed25519PublicKey, grant)).toMatchObject({
+            valid: true,
+        });
+    });
+
+    /**
+     * The Ed25519 key is loaded by unlocking, so this is the state a locked
+     * session is in — and a grant signed by nothing would be a grant nobody can
+     * verify, which is worse than a refusal.
+     */
+    it('refuses when no identity key is held', () => {
+        expect(() => new Keyring().signGrant(grant)).toThrow(KeyUnavailableError);
+    });
+
+    it('refuses to sign a malformed grant rather than committing to nonsense', () => {
+        const { keyring } = openAccount();
+
+        expect(() => keyring.signGrant({ ...grant, keyEpoch: 0 })).toThrow(InvalidParameterError);
     });
 });
 

@@ -76,7 +76,10 @@ async function seedVault(
         uuid: USER_UUID,
     });
 
-    await loadIdentity(crypto, USER_UUID, toBase64(registration.x25519PrivateKeyCt));
+    await loadIdentity(crypto, USER_UUID, {
+        x25519PrivateKeyCt: toBase64(registration.x25519PrivateKeyCt),
+        ed25519PrivateKeyCt: toBase64(registration.ed25519PrivateKeyCt),
+    });
 
     const sealedVault = await sealNewVault(
         crypto,

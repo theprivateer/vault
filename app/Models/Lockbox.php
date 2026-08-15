@@ -16,6 +16,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * The 2017 `control` boolean is gone — that concept was removed by its own
  * migration back then anyway.
  *
+ * @property int $id
  * @property string $uuid
  * @property Ciphertext $payload_ct
  * @property Ciphertext $wrapped_item_key

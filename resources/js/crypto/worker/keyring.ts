@@ -7,6 +7,8 @@
 import type { AadContext, AadParams } from '../aad';
 import { open, seal } from '../envelope';
 import { InvalidParameterError, KeyUnavailableError, MalformedEnvelopeError } from '../errors';
+import type { Grant, SignedGrant } from '../grant';
+import { signGrant } from '../grant';
 import { generateIdentity } from '../identity';
 import {
     deriveFromPassword,
@@ -346,6 +348,20 @@ export class Keyring {
         } finally {
             zeroise(itemKey);
         }
+    }
+
+    /**
+     * Signs a membership grant with the held Ed25519 key.
+     *
+     * Takes a grant rather than bytes, on purpose. A general signing operation
+     * would hand injected script the user's signature on anything the format
+     * ever comes to cover, from one foothold; this one can only ever produce a
+     * statement about a vault membership, and `signGrant` applies the grant
+     * domain separator so the result cannot be replayed as a self-signature or
+     * an audit entry.
+     */
+    signGrant(grant: Grant): SignedGrant {
+        return signGrant(this.require(ED25519_KEY), grant);
     }
 
     seal(handle: KeyHandle, plaintext: Uint8Array, aad: AadParams): Uint8Array {

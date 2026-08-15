@@ -94,10 +94,20 @@ user's out-of-band comparison is.
 | Column | Type | Notes |
 | --- | --- | --- |
 | `user_id` | FK, unique | |
-| `pins_ct` | binary | `{ [userUuid]: fingerprintHex }`, encrypted under the User Key |
+| `pins_ct` | binary | `{ [userUuid]: fingerprintHex }`, encrypted under the User Key; AAD context `user.pins` bound to the owner's UUID |
 | `version` | int | optimistic concurrency across devices |
 
-Encrypted so the server cannot see, or quietly reset, whose keys you have verified.
+Encrypted so the server cannot see, or quietly add to, whose keys you have verified. It can still
+drop the row or serve a stale copy — it holds the bytes — and that is survivable in a way the
+alternative is not: **forgetting a pin degrades to a verification prompt; forging one is silent
+interception.** Only forging is prevented, and only forging needs to be.
+
+The version is compared inside the `where` of the update, like `secrets.current_version`. Two
+devices that each verified somebody while the other was offline must not silently discard one
+another's decision — the user was told it was recorded.
+
+Padded before encryption, because the unpadded length is a count of how many people you have
+verified.
 
 ### `vaults`
 
@@ -132,9 +142,20 @@ Replaces the 2017 `user_vault` pivot with its `read_only` boolean.
 | `accepted_at` | timestamp null | recipient confirmed the granter's fingerprint |
 | `revoked_at` | timestamp null | |
 
-`grant_signature` and `grant_payload` are nullable as built in Phase 3, and become required in
-Phase 5 when grants are actually signed. Nullable now so that adding signed grants is a change to
-the write path rather than a migration of a populated table.
+`grant_signature` and `grant_payload` were nullable as built in Phase 3 and are written on every
+grant from Phase 5. They stay nullable in the schema, because the vault creator's own membership
+has no signature and cannot have one — there is nobody else whose key would be on it. A membership
+with no grant is therefore either the owner's, or a row nobody can account for, and the recipient's
+client renders the second as a warning rather than as a vault.
+
+**`grant_payload` is stored as the exact signed string and is not cast.** A signature verifies over
+bytes, and decoding then re-encoding is free to change the escaping of `/` or of non-ASCII. Every
+such change would turn a valid grant into one no recipient can verify, failing in a way that looks
+exactly like tampering. Read it as a string; parse a copy if you need the fields.
+
+**Re-granting reuses the row**, because `(vault_id, user_id)` is unique. What must not be reused is
+`accepted_at`: it is cleared, so a returning member verifies again. The reason somebody was removed
+may be the reason their keys should not be trusted.
 
 **Revocation is enforced on read, immediately.** A membership with `revoked_at` set is not a
 membership: every query filters it out and every policy treats it as absent, before any re-key has

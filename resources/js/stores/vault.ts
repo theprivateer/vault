@@ -36,7 +36,7 @@ import type {
     VaultRecord,
 } from '@/lib/items';
 import { buildIndex, EMPTY_INDEX, search, type Indexable, type SearchIndex } from '@/lib/search';
-import { onLock } from '@/stores/session';
+import { onLock } from '@/stores/lock';
 
 export type OpenedLockbox = Opened<LockboxRecord, LockboxPayload>;
 export type OpenedSecret = Opened<SecretRecord, SecretPayload>;

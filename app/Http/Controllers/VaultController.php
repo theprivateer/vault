@@ -77,6 +77,22 @@ class VaultController extends Controller
             'vault' => $vault->toClientArray($this->membershipFor($vault, $request)),
             'lockboxes' => $lockboxes->map(fn (Lockbox $lockbox): array => $lockbox->toClientArray()),
             'secrets' => $secrets,
+
+            /*
+             | Who else can read this vault, and the signed grant that put them
+             | there. The sharing graph is visible to the server anyway — it is
+             | named in docs/02 § Accepted leakage — so nothing is given away by
+             | showing it to the members themselves, and a vault whose member
+             | list you cannot see is one you cannot audit.
+             */
+            'members' => $vault->memberships()
+                ->whereNull('revoked_at')
+                ->with('user.identity', 'granter.identity')
+                ->get()
+                ->map(fn (VaultMembership $membership): array => $membership->toClientArray())
+                ->values(),
+
+            'rekeyRequiredAt' => $vault->rekey_required_at?->toIso8601String(),
         ]);
     }
 
