@@ -77,9 +77,10 @@ Read in this order:
 
 ## Status
 
-Phases 0–8 of [thirteen](docs/05-implementation-plan.md) are complete: a working zero-knowledge
+Phases 0–9 of [thirteen](docs/05-implementation-plan.md) are complete: a working zero-knowledge
 vault that can be shared with other people and taken back, holds encrypted attachments, keeps a
-tamper-evident log of what happened in it, and remembers what its secrets used to say.
+tamper-evident log of what happened in it, remembers what its secrets used to say, and can hand a
+single credential to somebody who has no account at all.
 
 - **Phase 0** — Inertia + Vue + TypeScript strict, a nonce-based CSP enforced from the first
   render, static analysis at maximum, CI gating every check.
@@ -110,8 +111,14 @@ tamper-evident log of what happened in it, and remembers what its secrets used t
   restoring is an ordinary edit and therefore never destructive, and retention plus an outright
   purge bound how long a rotated credential stays recoverable.
 
-Next is [Phase 9](docs/05-implementation-plan.md#phase-9--totp-generators--one-time-links): TOTP,
-password generators, and one-time share links.
+- **Phase 9** — TOTP codes generated in the browser from a seed stored like any other field, password
+  and passphrase generators whose entropy is arithmetic rather than an estimate, and one-time share
+  links. A link carries its own key in the URL fragment, so the server holds a payload it cannot read
+  and a hash it cannot reverse; putting the bearer token there too keeps it out of every access log
+  and means a chat client's link preview cannot spend the single view.
+
+Next is [Phase 10](docs/05-implementation-plan.md#phase-10--key-lifecycle-at-scale): key lifecycle
+at scale.
 
 ## Stack
 

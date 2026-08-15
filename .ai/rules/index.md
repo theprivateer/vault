@@ -5,11 +5,11 @@ Before planning or editing, find the row whose globs match the file's path and r
 | Applies to | Rule file |
 | --- | --- |
 | app/** | .ai/rules/app.md |
-| app/Http/Controllers/SecretController.php, app/Http/Controllers/VaultRekeyController.php, app/Http/Controllers/FileChunkController.php | .ai/rules/controllers.md |
+| app/Http/Controllers/SecretController.php, app/Http/Controllers/VaultRekeyController.php, app/Http/Controllers/FileChunkController.php, app/Http/Controllers/ShareLinkController.php | .ai/rules/controllers.md |
 | resources/js/crypto/**, resources/js/crypto/padding.ts, resources/js/crypto/grant.ts, resources/js/crypto/chunks.ts, resources/js/crypto/audit.ts | .ai/rules/crypto.md |
 | docs/** | .ai/rules/docs.md |
 | resources/js/** | .ai/rules/js.md |
-| resources/js/lib/**, resources/js/lib/sharing.ts, resources/js/lib/files.ts | .ai/rules/lib.md |
+| resources/js/lib/**, resources/js/lib/sharing.ts, resources/js/lib/files.ts, resources/js/lib/generate.ts | .ai/rules/lib.md |
 | app/Http/Middleware/SecurityHeaders.php | .ai/rules/middleware.md |
 | database/migrations/** | .ai/rules/migrations.md |
 | app/Models/VaultMembership.php | .ai/rules/models.md |

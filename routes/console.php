@@ -41,3 +41,11 @@ Schedule::command('vault:files-prune')->dailyAt('04:00')->withoutOverlapping();
  | removes is recorded on the same day it goes rather than the next one.
  */
 Schedule::command('vault:history-prune')->dailyAt('03:45')->withoutOverlapping();
+
+/*
+ | One-time share links past their expiry, revoked, or used up (Phase 9). Hourly
+ | rather than nightly: a share link is a credential in somebody else's inbox,
+ | and the window between "this can no longer be opened" and "this no longer
+ | exists" should be short.
+ */
+Schedule::command('vault:links-prune')->hourly()->withoutOverlapping();

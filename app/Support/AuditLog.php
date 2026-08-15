@@ -6,6 +6,7 @@ use App\Enums\AuditAction;
 use App\Models\AuditEvent;
 use App\Models\Lockbox;
 use App\Models\Secret;
+use App\Models\ShareLink;
 use App\Models\User;
 use App\Models\Vault;
 use App\Models\VaultFile;
@@ -53,6 +54,7 @@ final class AuditLog
         Lockbox::class => 'lockbox',
         Secret::class => 'secret',
         VaultFile::class => 'file',
+        ShareLink::class => 'sharelink',
     ];
 
     /**

@@ -11,6 +11,8 @@ app, so it avoids euphemism.
 | Secret payloads (credentials, notes, TOTP seeds) | Ciphertext at rest; plaintext in browser memory while unlocked | Total. This is the product. |
 | File contents | Ciphertext in object storage; plaintext transiently in browser | Total for that file |
 | Superseded secret payloads | Ciphertext at rest, each under its own Item Key | Total for the values they held — including one rotated *because* it leaked |
+| Share link keys and tokens | Only in a URL fragment, never on the server | Whoever holds the link holds the secret it carries |
+| TOTP seeds | Inside `payload_ct`, like any other field | Ongoing ability to produce valid codes for that account |
 | Vault Keys, Item Keys | Wrapped at rest; plaintext in browser memory while unlocked | Disclosure of everything they protect |
 | User Key, KEK, master password | Derived in browser; never at rest, never transmitted | Total compromise of that account, all vaults |
 | Recovery code | Shown once; user's responsibility thereafter | Equivalent to the password |
@@ -83,6 +85,14 @@ review, and a deliberately small crypto dependency surface — three `@noble` pa
 audited, all pure TypeScript, no post-install scripts, no transitive dependencies. This is a
 significant reason for choosing them.
 
+This entry has been paid for at least twice. TOTP is thirty lines of specified arithmetic here
+rather than a package, in both PHP and TypeScript. And `zxcvbn-ts`, which
+[05](05-implementation-plan.md#phase-9--totp-generators--one-time-links) named for password strength
+estimation, was declined in favour of a smaller in-house estimator: three packages and several
+hundred kilobytes of dictionaries is a poor trade for a progress bar. The cost is real and is stated
+where a user can see it — the meter says outright that it carries no dictionary and will overrate a
+word or a name.
+
 ## Accepted leakage
 
 The server necessarily learns:
@@ -125,6 +135,14 @@ The server necessarily learns:
   pin store is encrypted under the User Key, because a server that could read it would know which
   key substitutions would go unnoticed, and one that could write it could mark its own key as
   already trusted.
+- **Share links** — that a link exists, when it was created and by whom, when it expires, how many
+  times it may be opened and how many times it has been, and which secret it came from. What is not
+  visible is the token or the link key: both live in the URL fragment, which no browser transmits,
+  and the server holds only `BLAKE2b(token)` and a payload sealed under a key it has never seen.
+  The token reaching the server only in a request body rather than a path segment is what keeps it
+  out of access logs — a requirement no application-level control could satisfy if the token were in
+  the request line. A link's *opening* is recorded with no actor, because there is none: the
+  recipient has no account, and all that is known of them is a keyed hash of their address.
 - **Handles** — the identity directory confirms whether a handle exists to any signed-in user.
   Sharing by handle requires exactly that lookup, and D11 scopes the system to a small invited
   group where the member list is not the secret.
@@ -167,3 +185,4 @@ evidence.
 | SR8 | The audit log detects any insertion, deletion, reordering or modification of entries | `tests/Feature/Vault/AuditChainTest.php` — one deliberate-corruption case per kind, plus truncation from the end and a rewritten head, which the chain alone cannot catch. `AuditSignatureTest.php` covers a fabricated entry whose hashes were recomputed |
 | SR9 | Revoking a member rotates the Vault Key and re-wraps all item keys | `tests/Feature/Vault/RekeyTest.php`, `SharingTest.php` |
 | SR10 | The application sets a strict CSP with no `unsafe-inline` or `unsafe-eval` in `script-src` | `tests/Feature/SecurityHeadersTest.php`, asserted against real Vite output |
+| SR11 | A one-time share link opens the number of times it was allowed to and no more, and neither its token nor its key is ever written to a database row or a log | `tests/Feature/Vault/ShareLinkTest.php` — the count is consumed inside a locked transaction, and a sweep over every table and log file looks for both halves of the credential |

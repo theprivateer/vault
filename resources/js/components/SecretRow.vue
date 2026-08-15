@@ -18,6 +18,7 @@ import { Link } from '@inertiajs/vue3';
 import { computed, nextTick, ref, useId } from 'vue';
 
 import NoticePanel from '@/components/NoticePanel.vue';
+import TotpCode from '@/components/TotpCode.vue';
 import { reportReveal } from '@/lib/audit';
 import { copyForATime, CLIPBOARD_TTL_MS } from '@/lib/clipboard';
 import type { SecretPayload, SecretRecord } from '@/lib/items';
@@ -31,7 +32,7 @@ const props = defineProps<{
     canWrite: boolean;
 }>();
 
-const emit = defineEmits<{ edit: []; remove: [] }>();
+const emit = defineEmits<{ edit: []; remove: []; share: [] }>();
 
 const { crypto } = useSession();
 
@@ -149,6 +150,15 @@ async function copy(): Promise<void> {
                         v-if="canWrite"
                         type="button"
                         class="text-muted hover:text-ink"
+                        :aria-label="`Share ${label} with a one-time link`"
+                        @click="emit('share')"
+                    >
+                        share
+                    </button>
+                    <button
+                        v-if="canWrite"
+                        type="button"
+                        class="text-muted hover:text-ink"
                         :aria-label="`Edit ${label}`"
                         @click="emit('edit')"
                     >
@@ -200,6 +210,14 @@ async function copy(): Promise<void> {
             <p v-if="revealed" class="sr-only" role="status">
                 The value of {{ label }} is now visible on screen.
             </p>
+
+            <!--
+                The one-time code, generated here from a seed that has never left
+                this browser. Shown unmasked and without a reveal step: a TOTP
+                code is worth thirty seconds and is useless without the password
+                above it, so hiding it would be ceremony rather than protection.
+            -->
+            <TotpCode v-if="payload.totp" :secret="payload.totp" :label="label" />
 
             <p v-if="copied" class="text-2xs text-muted" role="status">
                 Cleared from the clipboard in {{ Math.round(CLIPBOARD_TTL_MS / 1000) }} seconds, if nothing

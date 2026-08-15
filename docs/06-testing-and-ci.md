@@ -187,6 +187,43 @@ transaction that guards the update, the loser's browser would have contributed a
 history whose corresponding edit never happened — a history that is honest about edits that
 succeeded is most of what makes it worth reading.
 
+### 3e. A credential in a URL — Phase 9
+
+A one-time share link inverts the usual property. Everywhere else the job is to keep key material
+inside the browser; here the key is *meant* to travel, in a URL, to a stranger. So the tests ask a
+different question: not "did the key stay in", but "did it stay out of everything the server writes
+down".
+
+`tests/Feature/Vault/ShareLinkTest.php` sweeps every table and every log file for both halves of the
+credential after a full create-and-open cycle. That is a canary rather than an assertion about a
+policy, and it exists because the original design put the token in the URL path — where no
+application-level control could have kept it out of a reverse proxy's access log. The test is the
+reason the token is in the fragment instead.
+
+Two details in it are worth copying elsewhere. The haystack is encoded with `JSON_UNESCAPED_SLASHES`,
+because the default escapes `/` and base64 is full of them — a sweep over the escaped form silently
+fails to match most values, and a canary that cannot find what it is looking for is worse than none.
+And the vacuity guard asserts the stored hash *is* present, so a sweep that found nothing because
+nothing was written cannot pass.
+
+On the client side, `crypto/sharelink.test.ts` covers the substitutions a malicious server would
+try, and `lib/sharelink.test.ts` covers the one thing that module is for: the creator posts the
+*hash* and the recipient posts the *token*. Swapping those is a one-word change, and in one
+direction it hands the server a redeemable credential while in the other it makes the stored value
+sufficient to open every outstanding link.
+
+### 3f. Distributions, not samples — Phase 9
+
+A generator's entropy figure is only honest if the draw is uniform, so `lib/generate.test.ts`
+asserts the distribution rather than spot-checking outputs. The first attempt bounded each of 62
+character counts at ±15% and failed about one run in six — at any width tight enough to catch a
+bias, one of 62 counts strays by chance.
+
+It is a chi-squared statistic now: 61 degrees of freedom, a threshold of 150, and a correct
+generator landing near 61. The bug it exists to catch — `random % 62`, which favours the first eight
+characters by 25% because 256 is not a multiple of 62 — produces a value above 800. The threshold
+sits in a very wide gap, which is what makes it a test rather than a coin flip.
+
 ### 4. Key material storage (SR7) — outstanding, Phase 11
 
 After unlock, assert `localStorage`, `sessionStorage`, IndexedDB and all cookies are free of key

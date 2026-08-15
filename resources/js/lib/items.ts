@@ -69,6 +69,14 @@ export interface SecretPayload {
     notes: string;
     url?: string;
     /**
+     * A base32 TOTP seed, inside the payload like everything else.
+     *
+     * Not a column, for the same reason `type` is not: a table that said which
+     * rows carry one-time-password seeds would be a list of the accounts worth
+     * attacking, handed over for free.
+     */
+    totp?: string;
+    /**
      * The 2017 `paranoid` flag, demoted from a column to a UI hint: require a
      * deliberate action to reveal, never copy automatically. It was never a
      * security control and is not one here.

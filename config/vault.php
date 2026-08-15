@@ -144,6 +144,37 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | One-Time Share Links
+    |--------------------------------------------------------------------------
+    |
+    | Handing one secret to somebody with no account. The link key and the bearer
+    | token both live in the URL fragment, which is never sent to the server, so
+    | what is stored here is an opaque payload and a hash — see
+    | docs/03-cryptographic-design.md#one-time-share-links-d9.
+    |
+    | Both caps are bounds on how long a credential can sit in somebody's chat
+    | history. An expiry is mandatory at the request level; these decide how far
+    | out it may be set, because the failure this feature must not have is
+    | becoming a slow way to publish a password.
+    |
+    | `max_views` above one exists for a recipient who reloads, or who opens the
+    | link on a phone after a laptop. It used to be a workaround for chat clients
+    | burning the single view on a link preview; putting the token in the
+    | fragment removed that problem, since an unfurler fetching `GET /s` never
+    | sees a token at all.
+    |
+    */
+
+    'share_links' => [
+        'max_hours' => (int) env('VAULT_SHARE_LINK_MAX_HOURS', 168),
+
+        'max_views' => (int) env('VAULT_SHARE_LINK_MAX_VIEWS', 10),
+
+        'default_hours' => (int) env('VAULT_SHARE_LINK_DEFAULT_HOURS', 24),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Audit Log
     |--------------------------------------------------------------------------
     |

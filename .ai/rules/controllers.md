@@ -3,6 +3,7 @@ paths:
   - app/Http/Controllers/SecretController.php
   - app/Http/Controllers/VaultRekeyController.php
   - app/Http/Controllers/FileChunkController.php
+  - app/Http/Controllers/ShareLinkController.php
 ---
 
 # Controllers
@@ -42,3 +43,10 @@ The archive is written inside the transaction that guards `current_version`, aft
 `itemKeys()` must cover lockboxes, secrets, files AND secret_versions, trashed rows included. Files and archived versions are the easy ones to miss because neither appears on the page an owner is looking at when they rotate — and Phase 6 did miss files, which would have made every attachment in a re-keyed vault permanently unopenable while the request reported success.
 
 The failure is silent in exactly the same way as skipping trashed rows: the client discards the old Vault Key, and nothing later can tell you which items were left behind. The server's defence is refusing an incomplete set, so anything gaining a `wrapped_item_key` column must be added here in the same commit. Caught by "the items nobody remembers" in tests/Feature/Vault/RekeyTest.php.
+
+## A share token lives in the URL fragment and arrives in a request body, never a path
+Never move the token to a route parameter (`/s/{token}`). A path segment is written to every reverse-proxy access log in the clear by default, and no application-level control can stop it — the requirement that no log holds a token is only achievable with the token in a POST body. Both the token and the link key live in the URL fragment, which browsers never transmit.
+
+Which half goes where is load-bearing and easy to invert: the **creator** posts `token_hash`, so the server never holds a redeemable credential; the **recipient** posts the raw token and the server hashes it. Sending a hash at redemption instead would make the stored value the thing that opens a link, so any database reader could open every outstanding share.
+
+Free consequence worth keeping: a chat client unfurling the link fetches `GET /s` with no fragment, so a link preview cannot consume a view. Redemption checks and increments inside one `lockForUpdate` transaction, and consumes the view *before* responding — a lost response burns the view, which is the correct direction to fail. Every unopenable state answers with the same 404. Guarded by tests/Feature/Vault/ShareLinkTest.php.

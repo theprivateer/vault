@@ -494,6 +494,38 @@ TOTP codes match a reference authenticator for a known seed. A share link opens 
 then 404s. The server logs, across the whole flow, contain neither the token nor the fragment —
 assert this, since it is the entire security argument for the design.
 
+### Carried forward from Phase 9
+
+All six tasks are built and every exit criterion has a passing test. TOTP is checked against
+RFC 6238's own appendix B vectors for SHA-1, SHA-256 and SHA-512 rather than against another
+implementation; `tests/Feature/Vault/ShareLinkTest.php` opens a link, opens it again, gets a 404,
+and then sweeps every table and every log file for both halves of the credential.
+
+**Three departures, each recorded where it is implemented.**
+
+The token moved out of the URL path and into the fragment. `/s/{token}` cannot satisfy the log
+requirement — a path segment is written to every reverse-proxy access log in the clear, and no
+application-level control changes that. Both halves now live in the fragment and the token arrives
+in a request body. This also removes task 6's caveat entirely: an unfurler fetching `GET /s` never
+sees a token, so **a link preview cannot burn a view**. `max_views` above one remains, for the
+recipient who reloads or opens it on a second device.
+
+`zxcvbn-ts` was declined and a smaller in-house estimator written instead — three packages and
+several hundred kilobytes of dictionaries against a threat model that names a small dependency
+surface as a defence (A10). The cost is real: it has no dictionary and will overrate a word or a
+name, so the meter says exactly that on screen, and `strength.test.ts` pins the limitation as a
+property rather than leaving it to be rediscovered as a bug.
+
+**There is no camera QR scanner**, which task 1 made conditional on the CSP allowing it cleanly. It
+does not: `Permissions-Policy` denies `camera=()` outright, lifting that would weaken a header that
+currently denies everything, and a QR decoder is another dependency for a path that ends at the same
+string the paste field already takes. Pasting the `otpauth://` URI is what a QR code encodes anyway.
+
+**Outstanding:** the creator has no list of their outstanding links. `ShareLink::toClientArray()` and
+the revoke route both exist and are tested; what is missing is a page that renders them, so a link
+can currently be withdrawn only by someone who can reach the endpoint. Worth doing before this is
+used in anger, and small.
+
 ---
 
 ## Phase 10 — Key lifecycle at scale

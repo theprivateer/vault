@@ -41,7 +41,7 @@ opaque to the server; search happens in the browser.
 
 ## Status
 
-**Phases 0 to 8 complete.**
+**Phases 0 to 9 complete.**
 
 - **Phase 0** — Inertia v3 + Vue 3 + TypeScript strict, a strict nonce-based CSP enforced from
   the first render, Larastan at max level, and CI gating every check.
@@ -90,4 +90,11 @@ opaque to the server; search happens in the browser.
   the liability and a purge ends it outright, because history of a credential rotated *because it
   leaked* is a copy of the leaked credential kept somewhere convenient.
 
-Next: [Phase 9 — TOTP, generators & one-time links](05-implementation-plan.md#phase-9--totp-generators--one-time-links).
+- **Phase 9** — the features that make it a tool you would use: TOTP codes generated in the browser
+  from a seed the server has never seen, password and passphrase generators whose entropy figure is
+  arithmetic rather than an estimate, and one-time share links for people with no account. The link
+  carries its own key in the URL fragment, so the server stores a blob it cannot read and a hash it
+  cannot reverse — and because the token is in the fragment too, a chat client's link preview cannot
+  spend the single view.
+
+Next: [Phase 10 — key lifecycle at scale](05-implementation-plan.md#phase-10--key-lifecycle-at-scale).

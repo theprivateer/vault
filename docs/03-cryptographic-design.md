@@ -555,23 +555,68 @@ Neither is a control against a member — anyone who could read those versions h
 
 ### One-time share links (D9)
 
-*Phase 9. Specified, not yet built.*
-
 The recipient has no account and no keys, so the link itself carries the key:
 
 1. `linkKey` ← 32 random bytes. `token` ← 32 random bytes.
-2. Client re-encrypts *just that secret's payload* under `linkKey` — this is why per-item keys
-   matter; the Vault Key is never involved in the share.
-3. POST `{ token_hash: BLAKE2b(token), payload_ct, expires_at, max_views }`. The server never
+2. Client re-encrypts *just that secret's payload* under `linkKey`, padded to a bucket as any
+   stored item is — this is why per-item keys matter; the Vault Key is never involved in the share.
+3. POST `{ token_hash: BLAKE2b(token), payload_ct, expires_in_hours, max_views }`. The server never
    receives `token` or `linkKey`.
-4. The URL is `https://host/s/{token}#{base64url(linkKey)}`. **The fragment is never sent to the
-   server** — that is the whole trick, and it is worth a comment in the code saying so.
-5. On open, the page fetches by `token`, decrypts with the fragment key, and the server
-   decrements the view count and deletes the record when exhausted or expired.
+4. The URL is `https://host/s#{base64url(token)}.{base64url(linkKey)}`. **The fragment is never
+   sent to the server** — that is the whole trick.
+5. On open, the page reads both halves out of the fragment and POSTs the token to `/s/reveal` in a
+   request body. The server hashes it, finds the row, consumes a view inside a locked transaction
+   and returns the ciphertext; the browser decrypts with the key that never left the address bar.
 
-Caveats to state in the UI: anyone with the link can read it once; the link will sit in the
-recipient's browser history and possibly their chat client's link preview fetcher, which may burn
-the single view. Offer a view count above one for that reason.
+**Both halves are in the fragment, which is a change from the original design here.** The token was
+specified as a path segment, `/s/{token}`, and that cannot meet the security requirement that no log
+holds a token: a path segment is written to every reverse-proxy access log in front of the
+application, in the clear, by default, and nothing in this codebase can prevent it. A request body
+is not logged by anything by default. That single move turns the requirement from a hope into a
+property, and `tests/Feature/Vault/ShareLinkTest.php` sweeps every table and log file to hold it.
+
+It also removes the caveat this section used to end with. A chat client unfurling the link fetches
+`GET /s` with no fragment, so **a link preview cannot consume a view** — the token never reaches
+the unfurler at all. `max_views` above one is still offered, but now for the honest reason: a
+recipient who reloads, or who opens it on a phone after a laptop.
+
+The AAD subject is derived from the token — `BLAKE2b(token)` formatted as a UUID — rather than
+transmitted, for the same reason a file chunk's nonce is derived: a value the server supplies is a
+value the server can substitute, and the rule is that the client builds every AAD from something
+the server did not choose. It is deliberately *not* `share_links.uuid`, which identifies the row for
+the server; conflating the two would hand the server the input it must not have.
+
+**The link key is the one key in this system that is meant to leave the device**, so it lives on the
+main thread rather than in the Worker. A Worker round trip would imply a containment this feature
+does not have, and saying so plainly is better — see `resources/js/crypto/sharelink.ts`.
+
+Caveats stated in the UI: anyone with the link can read it; the link is the credential and will sit
+in the recipient's chat history long after it stops working; and it cannot be re-issued, because the
+half after the `#` was never anywhere but that URL.
+
+### TOTP as a stored credential
+
+A seed lives inside `payload_ct` like any other field, and `resources/js/crypto/totp.ts` turns it
+into the six digits a user would otherwise read off a phone. It is **not** a column, for the same
+reason `type` is not: a table saying which rows carry one-time-password seeds would be a list of the
+accounts worth attacking, handed over for free.
+
+There are two TOTP implementations in the project and they are not redundant. `App\Support\Totp`
+guards *authentication* — the server holds that seed and checks that code. This one guards nothing;
+it is a credential the server has never seen. Moving it server-side would mean handing over a seed
+worth exactly as much as the password beside it.
+
+HMAC-SHA1 by specification rather than by choice: SHA-1's collision weaknesses do not apply to HMAC,
+and every authenticator expects it. SHA-256 and SHA-512 are accepted because `otpauth://` permits
+them. Verified against RFC 6238's own appendix B vectors for all three hashes, which is the
+reference worth matching — agreement between two implementations written from the same
+misunderstanding proves nothing.
+
+**There is no camera scanner.** `Permissions-Policy` denies `camera=()` outright, lifting that would
+weaken a header that currently denies everything, and a QR decoder is another dependency for a path
+that ends at the same string the paste field already accepts. Pasting the `otpauth://` URI — which
+is what the QR code encodes, and what every setup page offers as "can't scan?" text — reaches the
+same place.
 
 ### Audit chain (D9)
 

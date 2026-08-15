@@ -15,12 +15,16 @@ import { computed, ref, watch } from 'vue';
 
 import FileAttachments from '@/components/FileAttachments.vue';
 import NoticePanel from '@/components/NoticePanel.vue';
+import PasswordGenerator from '@/components/PasswordGenerator.vue';
 import SecretRow from '@/components/SecretRow.vue';
+import ShareSecret from '@/components/ShareSecret.vue';
+import StrengthMeter from '@/components/StrengthMeter.vue';
 import TextField from '@/components/TextField.vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { describeError } from '@/lib/errors';
 import type { FileRecord } from '@/lib/files';
 import { sealVersion } from '@/lib/history';
+import { parseOtpauth } from '@/crypto/totp';
 import {
     PAYLOAD_VERSION,
     sealItem,
@@ -41,6 +45,7 @@ const props = defineProps<{
     secrets: SecretRecord[];
     lockboxes: LockboxRecord[];
     files: FileRecord[];
+    shareLimits: { defaultHours: number; maxHours: number; maxViews: number };
 }>();
 
 const { isUnlocked, crypto } = useSession();
@@ -58,13 +63,17 @@ const {
 } = useVaultContents();
 
 /** The form's shape: every optional payload field made concrete for v-model. */
-type SecretDraft = Omit<SecretPayload, 'url' | 'paranoid'> & {
+type SecretDraft = Omit<SecretPayload, 'url' | 'paranoid' | 'totp'> & {
     url: string;
     paranoid: boolean;
+    totp: string;
     linkedLockboxUuid: string;
 };
 
 const editing = ref<string | null>(null);
+const sharing = ref<string | null>(null);
+const showGenerator = ref(false);
+const totpFailure = ref('');
 const draft = ref<SecretDraft>(emptyDraft());
 const writeFailure = ref('');
 const filter = ref('');
@@ -139,8 +148,51 @@ function emptyDraft(): SecretDraft {
         notes: '',
         url: '',
         paranoid: false,
+        totp: '',
         linkedLockboxUuid: '',
     };
+}
+
+/**
+ * The secret currently being shared, with its plaintext.
+ *
+ * A share re-encrypts the *decrypted* payload under a new key, so the panel can
+ * only open for a row this tab has actually opened — which is also why sharing a
+ * secret whose ciphertext failed to verify is impossible rather than merely
+ * discouraged.
+ */
+const shared = computed(() => inLockbox.value.find((entry) => entry.record.uuid === sharing.value) ?? null);
+
+/**
+ * Accepts either a bare base32 seed or a whole `otpauth://` URI.
+ *
+ * Pasting the URI is what people actually have — it is what a QR code encodes,
+ * and most setup pages offer it as "can't scan?" text. Parsing it here means the
+ * issuer and account travel no further than this function; only the seed is
+ * kept, because the rest is somebody else's label for an account we already have
+ * a name for.
+ *
+ * **There is no camera scanner**, and that is a decision rather than an
+ * omission. `Permissions-Policy` denies `camera=()` outright, lifting it would
+ * weaken a header that currently denies everything, and a QR decoder is another
+ * dependency for a path that ends at the same string this field accepts.
+ */
+function readTotp(value: string): string {
+    totpFailure.value = '';
+
+    const trimmed = value.trim();
+
+    if (trimmed === '' || !trimmed.toLowerCase().startsWith('otpauth:')) {
+        return trimmed;
+    }
+
+    try {
+        return parseOtpauth(trimmed).secret;
+    } catch (error) {
+        totpFailure.value = describeError(error, 'That one-time-password URI could not be read.');
+
+        return '';
+    }
 }
 
 watch(
@@ -162,6 +214,9 @@ watch(
 
 function startCreate(): void {
     editing.value = 'new';
+    sharing.value = null;
+    showGenerator.value = false;
+    totpFailure.value = '';
     writeFailure.value = '';
     draft.value = emptyDraft();
 }
@@ -172,11 +227,15 @@ function startEdit(entry: OpenedSecret): void {
     }
 
     editing.value = entry.record.uuid;
+    sharing.value = null;
+    showGenerator.value = false;
+    totpFailure.value = '';
     writeFailure.value = '';
     draft.value = {
         ...entry.payload,
         url: entry.payload.url ?? '',
         paranoid: entry.payload.paranoid ?? false,
+        totp: entry.payload.totp ?? '',
         linkedLockboxUuid: entry.record.linkedLockboxUuid ?? '',
     };
 }
@@ -196,7 +255,15 @@ function startEdit(entry: OpenedSecret): void {
 async function save(): Promise<void> {
     writeFailure.value = '';
 
-    const { linkedLockboxUuid, ...payload } = draft.value;
+    const { linkedLockboxUuid, totp, ...rest } = draft.value;
+
+    /*
+     | An empty seed is dropped rather than stored as "". A payload carrying
+     | `totp: ''` would make every row look like it has a one-time code and give
+     | the interface a blank ring to render, and the padding means the absent
+     | field costs nothing to omit.
+     */
+    const payload: SecretPayload = totp === '' ? rest : { ...rest, totp };
     const isNew = editing.value === 'new';
     const uuid = isNew ? uuid7() : (editing.value ?? '');
     const existing = inLockbox.value.find((entry) => entry.record.uuid === uuid);
@@ -302,6 +369,12 @@ function removeFile(uuid: string): void {
     });
 }
 
+function startShare(entry: OpenedSecret): void {
+    editing.value = null;
+    writeFailure.value = '';
+    sharing.value = entry.payload ? entry.record.uuid : null;
+}
+
 function remove(uuid: string): void {
     const rollback = removeOptimistic(uuid);
 
@@ -349,9 +422,45 @@ function remove(uuid: string): void {
             </div>
 
             <TextField v-model="draft.key" label="name" autofocus />
-            <TextField v-model="draft.value" label="value" />
+
+            <div>
+                <TextField v-model="draft.value" label="value" />
+                <StrengthMeter :password="draft.value" class="mt-2" />
+
+                <button
+                    type="button"
+                    class="mt-2 text-2xs text-muted hover:text-ink"
+                    :aria-expanded="showGenerator"
+                    @click="showGenerator = !showGenerator"
+                >
+                    {{ showGenerator ? 'hide generator' : 'generate one' }}
+                </button>
+
+                <PasswordGenerator
+                    v-if="showGenerator"
+                    class="mt-3"
+                    @use="
+                        (value) => {
+                            draft.value = value;
+                            showGenerator = false;
+                        }
+                    "
+                />
+            </div>
+
             <TextField v-model="draft.notes" label="notes" />
             <TextField v-model="draft.url" label="url" />
+
+            <div>
+                <TextField
+                    :model-value="draft.totp"
+                    label="one-time password seed"
+                    placeholder="base32 seed, or paste a whole otpauth:// link"
+                    hint="Stays inside the encrypted payload, like everything else. Paste the setup link a site gives you when you cannot scan its QR code."
+                    @update:model-value="(value: string) => (draft.totp = readTotp(value))"
+                />
+                <p v-if="totpFailure" class="mt-1 text-2xs text-accent">{{ totpFailure }}</p>
+            </div>
 
             <div>
                 <label class="label" for="secret-link">linked lockbox</label>
@@ -419,6 +528,7 @@ function remove(uuid: string): void {
                     "
                     :can-write="canWrite"
                     @edit="startEdit(entry)"
+                    @share="startShare(entry)"
                     @remove="remove(entry.record.uuid)"
                 />
             </div>
@@ -430,6 +540,17 @@ function remove(uuid: string): void {
         </template>
 
         <p v-else-if="!failure && !busy" class="mt-6 text-sm text-muted">No secrets in this lockbox yet.</p>
+
+        <ShareSecret
+            v-if="shared?.payload"
+            class="mt-6"
+            :secret-uuid="shared.record.uuid"
+            :payload="shared.payload"
+            :default-hours="shareLimits.defaultHours"
+            :max-hours="shareLimits.maxHours"
+            :max-views="shareLimits.maxViews"
+            @close="sharing = null"
+        />
 
         <FileAttachments
             v-if="!failure"

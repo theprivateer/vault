@@ -85,6 +85,21 @@ enum AuditAction: string
     case FileDeleted = 'file.deleted';
     case FilePruned = 'file.pruned';
 
+    /**
+     * One-time share links (Phase 9).
+     *
+     * `ShareLinkViewed` is the only event in the log with no actor and no
+     * possibility of one: the person who opened it has no account, and the
+     * server knows nothing about them beyond a keyed hash of their address. It
+     * is recorded anyway, because "this credential left the building, and when"
+     * is exactly what somebody investigating needs, and it is the only trace
+     * there will ever be.
+     */
+    case ShareLinkCreated = 'sharelink.created';
+    case ShareLinkViewed = 'sharelink.viewed';
+    case ShareLinkRevoked = 'sharelink.revoked';
+    case ShareLinkExpired = 'sharelink.expired';
+
     case MembershipGranted = 'membership.granted';
     case MembershipAccepted = 'membership.accepted';
     case MembershipRevoked = 'membership.revoked';
@@ -135,6 +150,10 @@ enum AuditAction: string
             self::FileDownloaded => 'downloaded a file',
             self::FileDeleted => 'deleted a file',
             self::FilePruned => 'was swept by the file sweeper',
+            self::ShareLinkCreated => 'created a one-time link to a secret',
+            self::ShareLinkViewed => 'was opened by someone with the link',
+            self::ShareLinkRevoked => 'withdrew a one-time link',
+            self::ShareLinkExpired => 'was swept after expiring',
             self::MembershipGranted => 'shared this vault',
             self::MembershipAccepted => 'accepted access to this vault',
             self::MembershipRevoked => 'revoked access to this vault',

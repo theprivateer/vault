@@ -12,6 +12,7 @@ use App\Models\VaultFile;
 use App\Support\AuditLog;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Config;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -88,6 +89,17 @@ class LockboxController extends Controller
             'secrets' => $secrets,
             'lockboxes' => $siblings->map(fn (Lockbox $sibling): array => $sibling->toClientArray()),
             'files' => $files->map(fn (VaultFile $file): array => $file->toClientArray()),
+            /*
+             | The bounds a share link may be created within (Phase 9). Sent so
+             | the form can offer a slider that cannot produce a request the
+             | server will refuse — the validation is still the authority, this
+             | is only what the interface shows.
+             */
+            'shareLimits' => [
+                'defaultHours' => Config::integer('vault.share_links.default_hours'),
+                'maxHours' => Config::integer('vault.share_links.max_hours'),
+                'maxViews' => Config::integer('vault.share_links.max_views'),
+            ],
         ]);
     }
 

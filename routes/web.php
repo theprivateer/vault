@@ -12,6 +12,7 @@ use App\Http\Controllers\LockboxController;
 use App\Http\Controllers\PinStoreController;
 use App\Http\Controllers\SecretController;
 use App\Http\Controllers\SecretHistoryController;
+use App\Http\Controllers\ShareLinkController;
 use App\Http\Controllers\UserIdentityController;
 use App\Http\Controllers\VaultController;
 use App\Http\Controllers\VaultMembershipController;
@@ -21,6 +22,30 @@ use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
 Route::redirect('/', '/vaults')->name('home');
+
+/*
+ | One-time share links (Phase 9).
+ |
+ | Outside both `auth` and `guest`: a link is for whoever holds it, which may be
+ | a stranger with no account or may be a colleague who happens to be signed in.
+ |
+ | **Neither route carries the token.** It lives in the URL fragment beside the
+ | link key, so `GET /s` serves an empty page and the browser posts the token to
+ | `/s/reveal` in a request body. A path segment would have been written to every
+ | access log in front of this application in the clear, which would make the
+ | security requirement that no log holds a token unachievable rather than
+ | merely untested. It also means a chat client unfurling the link fetches a page
+ | with no token in it and therefore cannot consume the single view.
+ |
+ | Throttled hard. This is the one unauthenticated endpoint that reads from the
+ | database by a secret value, so it is the one place a guessing attempt would
+ | go — 32 random bytes make that hopeless, but a rate limit turns hopeless into
+ | not worth attempting.
+ */
+Route::get('/s', [ShareLinkController::class, 'show'])->name('share.show');
+Route::post('/s/reveal', [ShareLinkController::class, 'reveal'])
+    ->middleware('throttle:20,1')
+    ->name('share.reveal');
 
 Route::middleware('guest')->group(function (): void {
     // Registration is invite-only (D11). There is no open sign-up route.
@@ -203,6 +228,22 @@ Route::middleware('auth')->group(function (): void {
      | touching the secret, and requiring the ability to delete the secret in
      | order to erase its past would be the wrong shape of permission.
      */
+    /*
+     | Creating a share link needs `update` on the secret rather than `view`.
+     |
+     | A viewer can already read the secret and could paste it into an email, so
+     | this is not a confidentiality boundary — it is that a share link creates a
+     | *durable* server-side artefact with the creator's name on it, and making
+     | one of those is a different act from reading.
+     */
+    Route::post('/secrets/{secret}/links', [ShareLinkController::class, 'store'])
+        ->middleware('can:update,secret')
+        ->name('links.store');
+
+    Route::delete('/links/{link}', [ShareLinkController::class, 'destroy'])
+        ->middleware('can:revoke,link')
+        ->name('links.destroy');
+
     Route::get('/secrets/{secret}/history', [SecretHistoryController::class, 'index'])
         ->middleware('can:view,secret')
         ->name('secrets.history');

@@ -33,10 +33,10 @@ users ──1:N── user_key_wraps          (password / recovery / [prf] wrapp
 
 audit_events   (hash-chained, standalone)
 audit_chain    (one row: the chain tip)
-share_links    (one-time, standalone) ·
+share_links    (one-time, standalone)
 ```
 
-Tables marked `·` are specified here but **not yet migrated** — `share_links` belongs to phase 9. The
+Every table above is migrated. The
 TOTP seed itself lives on `users` rather than in a table of its own; there was no second column
 worth the join.
 
@@ -224,7 +224,7 @@ The 2017 `control` boolean is gone; that concept was removed by its own migratio
 | --- | --- | --- |
 | `id` / `uuid` | | |
 | `lockbox_id` | FK cascade | |
-| `payload_ct` | binary | `{type, key, value, notes, totp?, url?}` — **including the type** |
+| `payload_ct` | binary | `{type, key, value, notes, totp?, url?}` — **including the type and any TOTP seed** |
 | `wrapped_item_key`, `payload_version` | | |
 | `linked_lockbox_id` | FK null | the 2017 lockbox-as-a-value feature, kept |
 | `sort_order` | int | |
@@ -244,7 +244,10 @@ asset-version protocol and answers one with a hard page reload, which would thro
 unsaved edit away while telling them nothing.
 
 **The type is inside the payload.** A `type` enum column would tell the server which secrets are
-TOTP seeds, which are SSH keys and which are notes — a meaningful targeting signal for free.
+TOTP seeds, which are SSH keys and which are notes — a meaningful targeting signal for free. The
+TOTP seed itself is in there for the same reason: a column saying which rows carry one would be a
+list of the accounts worth attacking. Codes are generated in the browser
+([03 § TOTP](03-cryptographic-design.md#totp-as-a-stored-credential)).
 
 **`linked_lockbox_id` is plaintext** because the server enforces that both ends live in the same
 vault, which requires seeing the edge. It leaks graph structure, which is already leaked by the
@@ -404,23 +407,44 @@ REVOKE UPDATE, DELETE ON audit_events FROM vault_app;
 
 Three layers because the first two are code, and code is changed by whoever is changing the code.
 
-### `share_links` (Phase 9)
+### `share_links`
 
 | Column | Type | Notes |
 | --- | --- | --- |
 | `id` / `uuid` | | |
-| `token_hash` | binary(32) unique | `BLAKE2b(token)`; the token itself is never stored |
-| `payload_ct` | binary | the secret re-encrypted under the link key — which the server never sees |
-| `created_by` | FK | |
+| `token_hash` | string(64) unique | base64 `BLAKE2b(token)`; the token itself is never stored |
+| `payload_ct`, `payload_version` | | the secret re-encrypted under the link key |
+| `created_by` | FK cascade | |
 | `secret_id` | FK null | nulled on secret delete; the link keeps working, by design |
-| `expires_at` | timestamp | |
+| `expires_at` | timestamp | mandatory, and bounded by `vault.share_links.max_hours` |
 | `max_views`, `view_count` | int | |
 | `revoked_at` | timestamp null | |
-| `created_at` | timestamp | |
+| `created_at` | timestamp | no `updated_at` — see below |
 
-A scheduled job hard-deletes expired and exhausted rows. `payload_ct` here is encrypted under the
-**link key**, which lives only in the URL fragment — a different key from everything else in the
-system, and worth a comment in the model.
+`vault:links-prune` hard-deletes expired, revoked and exhausted rows, hourly rather than nightly: a
+share link is a credential in somebody else's inbox, and the gap between "cannot be opened" and
+"no longer exists" should be short. Nothing here is recoverable and nothing should be, which is what
+separates this sweep from the file one — a purged file waits out a grace period *because it might be
+restored*, and a spent link has no such state.
+
+**`token_hash` is `string`, not the `text` every other opaque value uses.** It is the one indexed
+one, and MySQL cannot put a unique index on a TEXT column without a prefix length. It is a fixed 44
+characters, so a varchar costs nothing and is portable.
+
+**`payload_ct` is encrypted under a key from outside the hierarchy.** It is the only ciphertext in
+the schema that no Vault Key opens, and that is the point: a share must not be openable with a vault
+key, or handing over one secret would hand over the means to read the vault it came from. This is
+the concrete payoff of giving every item its own key.
+
+**There is no `updated_at`.** The only column that moves after creation is `view_count`, and a
+timestamp beside it would record when a stranger opened the link — the kind of fact the audit log
+should hold deliberately rather than a row should accumulate by accident.
+
+**The token reaches the server only in a request body**, never a path segment, because a path
+segment is written to every access log in front of the application in the clear. The creator's
+browser sends the *hash* and the recipient's browser sends the *token*; reversing either would put a
+working credential somewhere it does not need to be. See
+[03 § One-time share links](03-cryptographic-design.md#one-time-share-links-d9).
 
 ### Supporting tables
 

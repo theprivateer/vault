@@ -64,6 +64,10 @@ final class AuditMetadata
         'max_versions' => 'int',
         'max_age_days' => 'int',
 
+        /** How many times a one-time link may be opened. A structural choice
+         *  the creator made, not a fact about what was shared. */
+        'max_views' => 'int',
+
         /** Whether a second factor was used, and whether it was a backup code. */
         'second_factor' => 'bool',
         'backup_code' => 'bool',

@@ -3,6 +3,7 @@ paths:
   - 'resources/js/lib/**'
   - resources/js/lib/sharing.ts
   - resources/js/lib/files.ts
+  - resources/js/lib/generate.ts
 ---
 
 # Lib
@@ -31,3 +32,12 @@ An object URL is a live handle to decrypted bytes that anything on the page can 
 Use `withObjectUrl(blob, use)`, which revokes in a `finally`. The one exception is an `<img>` preview, which needs the handle until it decodes: revoke on `load`, on close, on unmount, and on `onLock`.
 
 Previews are an allow-list (`isPreviewable`), never a block-list. `image/svg+xml` is an image and also a document that can run script; `text/html` is the same problem with a different name.
+
+## Generated entropy is arithmetic; typed-password strength is a guess, and the UI must say which
+`generate.ts` reports `log2(alphabet) × length` as exact, which is only true because every draw uses rejection sampling from `crypto.getRandomValues`. Never replace `uniformIndex` with `random % n` — the bias silently shaves real entropy below the number displayed beside it, which is the one figure the user is being asked to trust. `generate.test.ts` guards this with a chi-squared test (61 df, threshold 150; a modulo bias scores over 800). Per-count bounds were tried first and were flaky at any useful width.
+
+Do not add "at least one of each class" post-processing: it removes valid outputs while the reported figure keeps describing the unsampled space. Capitalising adds no entropy either, and the code says so.
+
+`strength.ts` is deliberately weaker than zxcvbn — that dependency was declined for A10, with the user's approval. It has no dictionary and overrates words, names and l33t-speak. The meter states that on screen and the tests pin it as a property, so it is not rediscovered as a bug. If a dictionary is ever added, that wording has to change with it.
+
+The EFF wordlist is bundled, never fetched: the CSP forbids it, and asking a CDN for a wordlist tells a third party when somebody is creating a credential. `assertWordlistIntact()` checks the count the entropy arithmetic assumes.
