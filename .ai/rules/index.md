@@ -11,6 +11,7 @@ Before planning or editing, find the row whose globs match the file's path and r
 | resources/js/** | .ai/rules/js.md |
 | resources/js/lib/**, resources/js/lib/sharing.ts | .ai/rules/lib.md |
 | app/Http/Middleware/SecurityHeaders.php | .ai/rules/middleware.md |
+| database/migrations/** | .ai/rules/migrations.md |
 | app/Models/VaultMembership.php | .ai/rules/models.md |
 | resources/js/pages/** | .ai/rules/pages.md |
 | app/Policies/** | .ai/rules/policies.md |

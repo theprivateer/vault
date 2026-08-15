@@ -10,7 +10,7 @@ ciphertext and wrapped keys, and never holds a key capable of decrypting them.**
 
 | Doc | What it covers |
 | --- | --- |
-| [01 — Brief & Decisions](01-brief-and-decisions.md) | Goals, scope, the ten settled decisions and their rationale |
+| [01 — Brief & Decisions](01-brief-and-decisions.md) | Goals, scope, the twelve settled decisions and their rationale |
 | [02 — Threat Model](02-threat-model.md) | Assets, adversaries, what is and is not protected, accepted risks |
 | [03 — Cryptographic Design](03-cryptographic-design.md) | Key hierarchy, primitives, envelope format, every protocol flow |
 | [04 — Data Model](04-data-model.md) | Schema, what each column leaks, migration notes |
@@ -36,17 +36,17 @@ opaque to the server; search happens in the browser.
 - **Backend** — Laravel 13, PHP 8.4 (`ext-sodium` built in), Pest 5
 - **Frontend** — Inertia v3 + Vue 3 + TypeScript (strict), Tailwind 4, Vite 8
 - **Crypto** — `@noble/ciphers`, `@noble/curves`, `@noble/hashes` in the browser; WebCrypto for
-  RNG and bulk file encryption. Nothing on the server.
+  RNG, and for bulk file encryption once Phase 6 lands. Nothing on the server.
 
 ## Status
 
-**Phases 0 to 3 complete.**
+**Phases 0 to 5 complete.**
 
 - **Phase 0** — Inertia v3 + Vue 3 + TypeScript strict, a strict nonce-based CSP enforced from
   the first render, Larastan at max level, and CI gating every check.
 - **Phase 1** — the crypto core in `resources/js/crypto`: envelope format with mandatory AAD
-  binding, the key hierarchy, sealed boxes, identities, and the crypto Worker. 200 tests at 100%
-  coverage, verified against RFC vectors and cross-checked byte-for-byte against PHP's
+  binding, the key hierarchy, sealed boxes, identities, and the crypto Worker. Held at 100% branch
+  coverage ever since, verified against RFC vectors and cross-checked byte-for-byte against PHP's
   `ext-sodium`. Argon2id measured at 731 ms, so the CSP stays free of `wasm-unsafe-eval`
   ([ADR-0003](adr/0003-argon2id-implementation.md)).
 
@@ -59,4 +59,13 @@ opaque to the server; search happens in the browser.
   ([06](06-testing-and-ci.md#verified-by-hand-once)). The leak canary, the IDOR suite and the
   no-server-decryption gate all run on every commit.
 
-Next: [Phase 4 — client state, search & UX](05-implementation-plan.md#phase-4--client-state-search--ux).
+- **Phase 4** — the decrypted-item store and its synchronous wipe on lock, bulk decryption in the
+  Worker, client-side search, payload padding, and optimistic writes with concurrent-edit
+  detection. The scale ceiling is
+  [measured rather than asserted](06-testing-and-ci.md#the-scale-ceiling-measured).
+
+- **Phase 5** — sharing by signed grant, trust-on-first-use fingerprint pinning with a hard stop
+  when a key changes, and revocation that triggers an atomic re-key at exactly `key_epoch + 1`.
+  The phase where the asymmetric layer earns its place.
+
+Next: [Phase 6 — encrypted file attachments](05-implementation-plan.md#phase-6--encrypted-file-attachments).

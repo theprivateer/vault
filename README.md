@@ -152,7 +152,8 @@ npm run bench:vault           # the scale ceiling, at 100 / 1,000 / 10,000 secre
 npm run bench:argon2          # password stretching cost
 ```
 
-CI runs all of the above on every push. Several of the tests are load-bearing security controls
+CI runs all of the above on every push, apart from the two benchmarks, which are run by hand when
+a number needs revisiting. Several of the tests are load-bearing security controls
 rather than regression checks — the leak canary, the AAD-binding suite, the bit-flip integrity
 tests and the IDOR suite. [`docs/06`](docs/06-testing-and-ci.md) explains why each one exists.
 

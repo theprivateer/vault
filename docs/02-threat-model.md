@@ -49,9 +49,11 @@ MITM degenerates to A3.
 
 **A5 — Malicious authenticated user (a vault member).** A Viewer trying to write; a member trying
 to reach a vault they were never granted; a revoked member trying to retain access.
-*Partially defended.* Server-side policies enforce roles and membership on every request. Vault
-Key rotation on revocation (Phase 10) removes future access. **A revoked member keeps whatever
-they decrypted before revocation** — unavoidable, logged, and stated in the UI.
+*Partially defended.* Server-side policies enforce roles and membership on every request, and a
+revoked membership stops being one on the *next request* — before any re-key has happened. Vault
+Key rotation then removes future access to new ciphertext (built in Phase 5; made routine in
+Phase 10). **A revoked member keeps whatever they decrypted before revocation** — unavoidable,
+logged, and stated in the UI.
 
 **A6 — Metadata analyst.** Anyone with database or log access, inferring from what is necessarily
 plaintext.
@@ -129,17 +131,20 @@ Stated so they can be challenged:
 
 ## Security requirements
 
-Testable statements. Phase 12 verifies each one against a running system.
+Testable statements. Phase 11 closes the gaps below and Phase 12 verifies each one against a
+running system. **Where a requirement has no automated test yet, it says so** — a requirement
+listed as verified when it is not is worse than one listed as outstanding, because it reads as
+evidence.
 
 | # | Requirement | Verified by |
 | --- | --- | --- |
-| SR1 | No plaintext secret material is ever written to the database, logs, cache, queue or object storage | Leak canary test (Phase 3), log scanning in CI |
-| SR2 | No key capable of decrypting user content exists on the server, in any form, at any time | Code review; absence of any decrypt path; grep gate in CI |
-| SR3 | Tampering with any stored ciphertext produces a visible, specific error — never silent corruption or a null | Crypto unit tests; the explicit inverse of the 2017 `DecryptException` bug |
-| SR4 | A ciphertext cannot be moved between records or fields without detection | AAD binding tests |
-| SR5 | Every request is authorised against vault membership and role, independently of client claims | Policy tests on every endpoint; an IDOR test suite |
-| SR6 | Auth endpoints are rate limited per-IP and per-account, and do not reveal whether an account exists | Feature tests, including the pre-auth KDF-params endpoint |
-| SR7 | Key material never reaches `localStorage`, `sessionStorage`, IndexedDB or a cookie | Storage assertions in E2E tests |
-| SR8 | The audit log detects any insertion, deletion, reordering or modification of entries | Chain verification test with deliberate corruption |
-| SR9 | Revoking a member rotates the Vault Key and re-wraps all item keys | Feature + E2E test |
-| SR10 | The application sets a strict CSP with no `unsafe-inline` or `unsafe-eval` in `script-src` | Header assertion test in CI |
+| SR1 | No plaintext secret material is ever written to the database, logs, cache, queue or object storage | `tests/Feature/Vault/LeakCanaryTest.php` — two sentinels, a vacuous-pass guard and a self-test |
+| SR2 | No key capable of decrypting user content exists on the server, in any form, at any time | `tests/Feature/NoServerDecryptionTest.php`, plus the CI grep gate over `app/` |
+| SR3 | Tampering with any stored ciphertext produces a visible, specific error — never silent corruption or a null | `crypto/envelope.test.ts` — every single-bit mutation of a short envelope throws |
+| SR4 | A ciphertext cannot be moved between records or fields without detection | `crypto/aad.test.ts`, `crypto/keys.test.ts` |
+| SR5 | Every request is authorised against vault membership and role, independently of client claims | `tests/Feature/Vault/AuthorisationTest.php` (IDOR) and `RoleMatrixTest.php` (role × action) |
+| SR6 | Auth endpoints are rate limited per-IP and per-account, and do not reveal whether an account exists | `tests/Feature/Auth/LoginTest.php`, `RecoveryTest.php` — including the pre-auth salt endpoints |
+| SR7 | Key material never reaches `localStorage`, `sessionStorage`, IndexedDB or a cookie | **Not yet automated.** Holds by construction — nothing in `resources/js` calls any of those APIs — but construction is not a test. Needs the Phase 11 E2E suite |
+| SR8 | The audit log detects any insertion, deletion, reordering or modification of entries | **Not built** — Phase 7 |
+| SR9 | Revoking a member rotates the Vault Key and re-wraps all item keys | `tests/Feature/Vault/RekeyTest.php`, `SharingTest.php` |
+| SR10 | The application sets a strict CSP with no `unsafe-inline` or `unsafe-eval` in `script-src` | `tests/Feature/SecurityHeadersTest.php`, asserted against real Vite output |

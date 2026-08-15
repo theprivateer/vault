@@ -1,7 +1,8 @@
 # 03 — Cryptographic Design
 
-The specification. Phase 2 implements exactly this and nothing else; if reality forces a change,
-this document changes first.
+The specification. The implementation follows this document and nothing else; if reality forces a
+change, this document changes first and the code second. Sections describing work not yet built
+say which phase owns them.
 
 ## Primitives
 
@@ -31,17 +32,25 @@ scripts. The whole crypto dependency surface is three packages that can be read 
 
 ### KDF performance
 
-Pure-JS Argon2id at 64 MiB / t=3 is slow — plausibly 1–3 seconds on a laptop and worse on a
-phone. Mitigations, in order:
+The budget, set before anything was built on it: **under 2 s on a modern laptop, under 5 s on a
+mid-range phone.** The concern was that pure-JS Argon2id at 64 MiB / t=3 would miss it, forcing a
+swap to `hash-wasm` and with it `'wasm-unsafe-eval'` in `script-src` — a slower unlock versus a
+looser CSP, which is a trade to make with measurements in hand rather than by guesswork.
 
-1. Run all KDF work in a **Web Worker**, so the UI stays responsive and shows real progress.
-   This is needed anyway for key isolation (see [Key handling in memory](#key-handling-in-memory)).
-2. Benchmark on real devices as the first task of Phase 2, against a documented budget:
-   **under 2 s on a modern laptop, under 5 s on a mid-range phone.**
-3. If the budget is missed, swap the Argon2 implementation for `hash-wasm` behind the same
-   interface. This costs `'wasm-unsafe-eval'` in `script-src`, which weakens D10's CSP. **That
-   trade — a slower unlock versus a looser CSP — is a decision to make with measurements in hand,
-   and to record as an ADR.** Do not pre-empt it.
+**Measured, and the question is closed.** `@noble/hashes` 2.3.0 at the specified parameters runs
+in **731 ms** on an Apple M1 (`npm run bench:argon2`, five runs after a warm-up). That is
+comfortably inside the laptop budget, so no second implementation needed evaluating and the CSP
+keeps no `'wasm-unsafe-eval'`. The reasoning and the rejected alternatives are in
+[ADR-0003](adr/0003-argon2id-implementation.md).
+
+Two things still hold:
+
+- All KDF work runs in the **crypto Web Worker**, so the main thread stays responsive and can show
+  real progress. This is needed anyway for key isolation (see
+  [Key handling in memory](#key-handling-in-memory)).
+- **The phone figure is still an estimate, not a measurement.** A mid-range phone is typically 2–4×
+  slower than an M1, which puts unlock at roughly 1.5–3 s — inside the budget, but nobody has run
+  it on a real device. Outstanding; it reopens the WASM question only if it comes in above 5 s.
 
 Parameters are stored per-user in the database so they can be raised later without a flag day;
 see [Parameter upgrades](#parameter-upgrades).
@@ -100,9 +109,15 @@ Every ciphertext at rest, other than file bodies, uses one binary envelope:
   0x01     0x01 = XChaCha20-Poly1305
 ```
 
-Stored as `BLOB`/`BYTEA`. `ver` allows the envelope structure to change; `alg` allows the
-primitive to change. A decryptor rejects anything it does not recognise with a specific error —
-never a silent fallback.
+`ver` allows the envelope structure to change; `alg` allows the primitive to change. A decryptor
+rejects anything it does not recognise with a specific error — never a silent fallback.
+
+**Stored base64-encoded in `text` columns, not as `BLOB`/`BYTEA`.** Postgres hands `BYTEA` back as
+a stream resource while SQLite hands back a string, and that difference would surface only in
+production, on the one type nobody wants surprises from. The 33% overhead is irrelevant at these
+sizes because file bodies live in object storage rather than the database. `App\Support\Ciphertext`
+is the only thing that touches the encoding, and it re-encodes on the way in so the stored form is
+canonical regardless of what padding or whitespace a client sent.
 
 ### Associated data binding
 
@@ -309,8 +324,9 @@ but necessary ordering detail. The server validates the UUID's version and uniqu
      click, and a high-severity audit event. This is precisely what a server substituting its own
      key looks like.
 3. `wrapped = seal(vaultKey, recipient.x25519_pk)`.
-4. `grant = { vault_uuid, recipient_uuid, recipient_fingerprint, role, key_epoch, granted_at }`;
-   `signature = Ed25519_sign(granter.sk, canonical_json(grant))`.
+4. `grant = { vaultUuid, recipientUuid, recipientFingerprint, role, keyEpoch, grantedAt }`;
+   `signature = Ed25519_sign(granter.sk, canonical_json(grant))` — see
+   [the grant format](#the-grant-format) for the exact bytes.
 5. POST the wrapped key, the grant and the signature.
 6. The recipient's client **verifies the signature against the granter's pinned public key**
    before trusting the vault. A server-fabricated membership row has no valid signature.
@@ -382,6 +398,8 @@ a symmetric grid is a birthday problem, so an attacker willing to grind roughly 
 minutes of work — could produce a different identity that draws the same picture. Every place it
 appears therefore shows the characters beside it, and the wording asks the user to compare those.
 
+#### Degenerate public keys
+
 **Small-order public keys must be rejected.** Ed25519 verification accepts an all-zero signature
 against an all-zero public key, for any message. Without an explicit check, a malicious server
 could publish a degenerate identity whose self-signature verifies — defeating the exact check
@@ -434,6 +452,8 @@ then unlikely to be the whole set either.
 
 ### Files
 
+*Phase 6. Specified, not yet built.*
+
 Chunked AES-256-GCM via WebCrypto:
 
 - `fileKey` ← 32 random bytes, wrapped by the Vault Key like any other item key.
@@ -452,6 +472,8 @@ Chunked AES-256-GCM via WebCrypto:
 
 ### One-time share links (D9)
 
+*Phase 9. Specified, not yet built.*
+
 The recipient has no account and no keys, so the link itself carries the key:
 
 1. `linkKey` ← 32 random bytes. `token` ← 32 random bytes.
@@ -469,6 +491,8 @@ recipient's browser history and possibly their chat client's link preview fetche
 the single view. Offer a view count above one for that reason.
 
 ### Audit chain (D9, Phase 7)
+
+*Specified, not yet built.*
 
 ```
 entry.hash = BLAKE2b-256( prev_hash ‖ canonical_json({seq, actor, action, subject, meta, at}) )
@@ -491,8 +515,10 @@ The server writes entries, so a compromised server can rewrite the whole chain. 
   handles and sends `{op, itemId, ciphertext}` messages. Injected script on the main thread can
   request decryptions; it cannot read the User Key. That is a meaningful reduction in blast
   radius, not a solution to XSS.
-- Never `localStorage`, `sessionStorage`, IndexedDB, cookies, or the Vue/Inertia page props.
-  Asserted in E2E tests (SR7).
+- Never `localStorage`, `sessionStorage`, IndexedDB, cookies, or the Vue/Inertia page props. This
+  holds by construction — no code in `resources/js` calls any of those storage APIs at all — but
+  construction is not a test, and the E2E assertion that would make it one is still outstanding
+  (SR7, Phase 11).
 - Overwrite `Uint8Array`s with zeros after use. In a garbage-collected runtime this is
   best-effort and does not survive `structuredClone` or GC copying — do it anyway, and document
   that it is hygiene rather than a guarantee.

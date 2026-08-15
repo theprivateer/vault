@@ -314,6 +314,19 @@ Grant, accept, revoke — with fingerprint verification, signed grants and re-ke
   every item key is a different ciphertext and `key_epoch` advanced.
 - A deliberately interrupted re-key leaves the vault fully on the old epoch, never mixed.
 
+### Carried forward
+
+Tasks 1–8 are built and every exit criterion above has a passing test. **Task 9 is not.** Ownership
+transfer and the guard against deleting a shared vault are both still outstanding, and the two are
+the same problem seen from either end: a vault with other members must have somewhere to go before
+its owner can leave, or the members are left holding a Vault Key that wraps rows nobody can reach.
+The deletion semantics in [04](04-data-model.md#cascade-and-deletion-semantics) already say the UI
+blocks deletion until a transfer has happened; the UI does not yet block it.
+
+What *is* in place is the narrower guard underneath: `VaultMembershipPolicy` refuses to revoke an
+owner's membership, so the last administrator cannot be removed by the revocation path. Deleting
+the vault outright is the route that is still open.
+
 ---
 
 ## Phase 6 — Encrypted file attachments
@@ -399,7 +412,7 @@ re-wraps version keys too, and old versions still open afterwards.
 2. Password generator (length, character classes) and passphrase generator (EFF wordlist, bundled
    locally — no CDN, which the CSP forbids anyway). Entropy shown in bits.
 3. Strength estimation with `zxcvbn-ts`, entirely client-side.
-4. One-time share links per [03](03-cryptographic-design.md#one-time-share-links): link key in the
+4. One-time share links per [03](03-cryptographic-design.md#one-time-share-links-d9): link key in the
    URL fragment, `token_hash` server-side, view counting, expiry, a scheduled purge job.
 5. The recipient view for someone with no account, on a page with the same strict CSP.
 6. UI caveats: link previews in chat clients can consume a view; offer a view count above one.

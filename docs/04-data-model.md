@@ -4,11 +4,17 @@ Conventions throughout:
 
 - **`_ct` suffix = ciphertext.** An opaque envelope ([03](03-cryptographic-design.md#envelope-format)).
   The server validates length and never parses the contents.
+- **`binary(n)` below describes the *decoded* value, not the column type.** Every ciphertext, key
+  and signature is stored **base64 in a `text` column**, because Postgres returns `BYTEA` as a
+  stream resource while SQLite returns a string — a divergence that would only ever show up in
+  production. `App\Support\Ciphertext` is the single place that knows the encoding, and it holds no
+  `decrypt()` method by design. See
+  [03 § Envelope format](03-cryptographic-design.md#envelope-format).
 - **UUIDv7 public identifiers**, generated client-side so AAD can bind to them before insert.
   Auto-increment `id` stays internal and never appears in a URL or an API response.
 - **Every table gets a leakage note.** If a column is plaintext, the reason is written down.
-- Postgres in production (`BYTEA`, real `CHECK` constraints, `jsonb`); SQLite is fine for local
-  dev and tests, which is the current `.env` default.
+- Postgres in production (real `CHECK` constraints, `jsonb`); SQLite is fine for local dev and
+  tests, which is the current `.env` default.
 
 ## Diagram
 
@@ -17,17 +23,21 @@ users ──1:N── user_key_wraps          (password / recovery / [prf] wrapp
   │
   ├──1:1──── user_identities          (X25519 + Ed25519 public keys, encrypted private keys)
   ├──1:1──── user_pin_stores          (encrypted TOFU fingerprint cache)
-  ├──1:1──── user_totp                (server-side second factor — unrelated to stored TOTP seeds)
+  ├──1:N──── totp_backup_codes        (hashed, single-use — the second factor's escape hatch)
   │
   └──1:N── vault_memberships ──N:1── vaults
                                        │
                                        └──1:N── lockboxes
-                                                  ├──1:N── secrets ──1:N── secret_versions
-                                                  └──1:N── files
+                                                  ├──1:N── secrets ──1:N── secret_versions ·
+                                                  └──1:N── files ·
 
-audit_events   (hash-chained, standalone)
-share_links    (one-time, standalone)
+audit_events   (hash-chained, standalone) ·
+share_links    (one-time, standalone) ·
 ```
+
+Tables marked `·` are specified here but **not yet migrated** — they belong to phases 6 to 9. The
+TOTP seed itself lives on `users` rather than in a table of its own; there was no second column
+worth the join.
 
 ## Tables
 
@@ -64,12 +74,21 @@ D11 is a small trusted group, and email is required for invites to work at all.
 | `method` | enum | `password`, `recovery`, `prf` (reserved) |
 | `wrapped_user_key` | binary | envelope; AAD context `user.userkey` |
 | `salt` | binary(16) null | the recovery salt, for `method=recovery` |
+| `verifier_hash` | string null | slow hash of the **recovery auth key**, for `method=recovery` |
 | `label` | string null | e.g. which passkey, once PRF lands |
 | `last_used_at` | timestamp null | |
 
-Unique on `(user_id, method)` for `password`; multiple `prf` rows allowed later. A separate table
-rather than columns on `users` because the set of unlock methods is open-ended — this is what
-makes passkey unlock a data change rather than a migration of the auth flow.
+Unique on `(user_id, method, label)`; multiple `prf` rows are allowed later, distinguished by
+label. A separate table rather than columns on `users` because the set of unlock methods is
+open-ended — this is what makes passkey unlock a data change rather than a migration of the auth
+flow.
+
+**`verifier_hash` is what lets the server verify a recovery attempt without being able to complete
+one.** The recovery code is split exactly as the password is: one derivation unwraps the User Key
+and stays in the browser, the other is sent and stored here as a slow hash. Without the split the
+design has no safe option — either the recovery wrapping is handed to anyone who names an address,
+or the server receives the code itself and, holding the wrapping already, has the User Key
+outright. See [03 § Recovery](03-cryptographic-design.md#recovery).
 
 ### `user_identities`
 
@@ -138,7 +157,7 @@ Replaces the 2017 `user_vault` pivot with its `read_only` boolean.
 | `key_epoch` | int | must match `vaults.key_epoch` to be usable |
 | `granted_by` | FK | |
 | `grant_signature` | binary(64) | Ed25519 over the canonical grant |
-| `grant_payload` | json | the exact bytes that were signed — stored so signatures stay verifiable if the canonicalisation ever changes |
+| `grant_payload` | json (text-preserving) | the exact bytes that were signed — stored so signatures stay verifiable if the canonicalisation ever changes |
 | `accepted_at` | timestamp null | recipient confirmed the granter's fingerprint |
 | `revoked_at` | timestamp null | |
 
@@ -152,6 +171,13 @@ client renders the second as a warning rather than as a vault.
 bytes, and decoding then re-encoding is free to change the escaping of `/` or of non-ASCII. Every
 such change would turn a valid grant into one no recipient can verify, failing in a way that looks
 exactly like tampering. Read it as a string; parse a copy if you need the fields.
+
+The same reasoning constrains the column type, which is easy to get wrong in the other direction.
+The migration declares `json`, which on Postgres stores the input text verbatim and is therefore
+safe. **`jsonb` would not be:** it normalises whitespace, reorders keys and drops duplicates, which
+is precisely the re-encoding this column exists to avoid. If the type is ever revisited, `text` is
+the honest choice — the value is a signed blob that happens to look like JSON, not a document the
+database should have opinions about.
 
 **Re-granting reuses the row**, because `(vault_id, user_id)` is unique. What must not be reused is
 `accepted_at`: it is cleared, so a returning member verifies again. The reason somebody was removed
@@ -234,7 +260,7 @@ re-wrapping, exactly like a live item, and no version is ever re-encrypted.
 recoverable forever. Default to keeping the last 20 versions and 180 days, configurable per vault,
 with a "purge history" action. This tension is worth a UI note.
 
-### `files`
+### `files` (Phase 6 — not yet migrated)
 
 | Column | Type | Notes |
 | --- | --- | --- |
@@ -297,12 +323,15 @@ system, and worth a comment in the model.
 
 - `invites` — `email`, `token_hash`, `invited_by`, `expires_at`, `accepted_at`. Carries **no key
   material** (D8); it authorises account creation only.
+- `totp_backup_codes` — one row per code, stored hashed and marked as used rather than deleted, so
+  a user can see that a code was spent. Guards *authentication only*: a second factor cannot gate
+  decryption, because decryption does not involve the server.
 - `sessions` — Laravel's default (`SESSION_DRIVER=database`), with `SESSION_ENCRYPT=true` and
   `SameSite=Strict`.
-- `password_reset_tokens` — **deliberately unused.** There is no password reset, because the
-  server cannot re-wrap a User Key it cannot unwrap. The route returns a page explaining the
-  recovery kit. Dropping the table entirely is the honest option; keeping it empty invites a
-  future contributor to wire it up.
+- `password_reset_tokens` — **dropped, not merely unused.** There is no password reset, because the
+  server cannot re-wrap a User Key it cannot unwrap, and the route returns a page explaining the
+  recovery kit instead. Keeping the table empty would have invited a future contributor to wire it
+  up; removing it means the schema itself says there is nothing to wire.
 
 ## Cascade and deletion semantics
 
