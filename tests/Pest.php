@@ -1,5 +1,8 @@
 <?php
 
+use App\Models\User;
+use App\Models\UserIdentity;
+use App\Models\UserKeyWrap;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Testing\TestResponse;
 use Tests\TestCase;
@@ -113,4 +116,37 @@ function payloadString(array $payload, string $key): string
     }
 
     return $value;
+}
+
+/**
+ * An account with a password wrapping, a recovery wrapping and an identity.
+ *
+ * Shared rather than local to the recovery tests because the security-alert
+ * tests exercise the same two flows from the other side, and a second fixture
+ * that drifted from this one would let both files pass while the flow they
+ * describe no longer matched.
+ */
+function recoverableAccount(string $email = 'ada@example.com'): User
+{
+    $user = User::factory()->create(['email' => $email]);
+
+    UserKeyWrap::factory()->for($user)->create();
+    UserKeyWrap::factory()->for($user)->recovery()->create();
+    UserIdentity::factory()->for($user)->create();
+
+    return $user;
+}
+
+/**
+ * @param  array<string, mixed>  $overrides
+ * @return array<string, mixed>
+ */
+function passwordChangePayload(array $overrides = []): array
+{
+    return array_merge([
+        'kdf_salt' => base64_encode(random_bytes(16)),
+        'kdf_params' => ['m' => 65536, 't' => 3, 'p' => 1],
+        'auth_key' => base64_encode(random_bytes(32)),
+        'wrapped_user_key' => base64_encode(random_bytes(74)),
+    ], $overrides);
 }

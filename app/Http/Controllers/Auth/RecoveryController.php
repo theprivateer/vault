@@ -6,6 +6,7 @@ use App\Enums\AuditAction;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\UserKeyWrap;
+use App\Notifications\AccountSecurityAlert;
 use App\Rules\Base64Bytes;
 use App\Support\AuditLog;
 use App\Support\DecoyHash;
@@ -14,10 +15,12 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
+use Throwable;
 
 /**
  * Recovery, and the password change that follows it.
@@ -132,6 +135,16 @@ class RecoveryController extends Controller
          */
         AuditLog::record(AuditAction::RecoveryUsed, $user, [], $user);
 
+        /*
+         | And the same fact again, to an inbox this server does not control.
+         |
+         | The log entry above is the record; this is the one that reaches
+         | somebody. An attacker holding the kit is about to hold the account,
+         | the session and every in-product view of that entry — including the
+         | activity page it was written for.
+         */
+        $this->alert($user, AuditAction::RecoveryUsed);
+
         return response()->json([
             'wrappedUserKey' => $wrap->wrapped_user_key->base64,
             'userKeyAad' => [
@@ -205,6 +218,19 @@ class RecoveryController extends Controller
             AuditLog::record(AuditAction::PasswordChanged, $user, [], $user);
         });
 
+        /*
+         | Not when the session came from the kit. That user has already had the
+         | recovery alert moments earlier, and the password change is the step
+         | this flow forces on them — a second email saying their password
+         | changed would be reporting their own compliance back to them, and
+         | would teach them that these messages are noise.
+         |
+         | Outside the transaction, because mail cannot be rolled back.
+         */
+        if (! $viaRecovery) {
+            $this->alert($user, AuditAction::PasswordChanged);
+        }
+
         return response()->json(['ok' => true]);
     }
 
@@ -224,6 +250,32 @@ class RecoveryController extends Controller
         AuditLog::record(AuditAction::RecoveryKitIssued, $user, [], $user);
 
         return response()->json(['ok' => true]);
+    }
+
+    /**
+     * Mails the out-of-band copy of an event, and never fails the request for it.
+     *
+     * The ordering matters: the account is already recovered and the password
+     * already changed by the time this runs. A locked-out user must not be
+     * turned away at the last step because the mail host is down — that would
+     * make a broken SMTP configuration into a broken recovery flow, which is the
+     * one flow that has no second way through.
+     *
+     * Logged loudly instead, with no message body and no address: the failure
+     * needs to be visible to an operator, and an exception from a mail
+     * transport is not somewhere to be careless about what it quotes back.
+     */
+    private function alert(User $user, AuditAction $action): void
+    {
+        try {
+            $user->notify(new AccountSecurityAlert($action, now()));
+        } catch (Throwable $e) {
+            Log::error('Security alert could not be delivered.', [
+                'action' => $action->value,
+                'user' => $user->uuid,
+                'exception' => $e::class,
+            ]);
+        }
     }
 
     private function storeRecoveryKit(Request $request, User $user): void

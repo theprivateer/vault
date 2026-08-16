@@ -177,6 +177,45 @@ because the `Worker` constructor has no integrity option in any browser.
 costs nothing and closes the document to anything embedded from elsewhere. Omitted while the Vite
 dev server is running, since that serves modules cross-origin.
 
+### F11 — A concurrent edit wrote wrapped Item Keys into the session store
+
+**Severity: low. Fixed.** *Found after Phase 11 closed, in a sweep of the implementation plan for
+work that had dropped between phases.*
+
+Laravel turns a `ValidationException` into a redirect carrying the request body, so a form can be
+repopulated. `bootstrap/app.php` narrowed that with a `dontFlash` list — written in Phase 0,
+against fields that did not exist yet, and never revisited. By the end of Phase 11 three of its
+seven entries (`current_password`, `master_password`, `recovery_code`) named nothing anywhere in
+the codebase, and every field added in the eleven phases since was missing from it.
+
+What that let through, confirmed against a real request rather than reasoned about:
+
+```
+uuid, payload_ct, wrapped_item_key, payload_version,
+version_uuid, version_payload_ct, version_wrapped_item_key,
+version_payload_version, expected_version
+```
+
+Two ciphertext payloads and **two wrapped Item Keys**, written to the `database` session driver.
+The trigger is not an attack: a concurrent-edit conflict is a validation error by deliberate design
+(`.ai/rules/controllers.md`), so this was the routine case of two tabs open on one secret.
+
+The exposure is bounded — the session is encrypted at rest, and the row belongs to the person who
+submitted it — but it is bounded by `APP_KEY`, which is exactly the thing wrapping an Item Key
+exists in order not to depend on. The auth endpoints were a near miss for the same reason:
+`recovery_auth_key` and `current_auth_key` were not on the list either, and only escaped because
+`resources/js/lib/http.ts` sends `Accept: application/json`, which takes the 422 path instead of
+the redirect. That is a property of the client, not of the server.
+
+**The fix is not a longer list.** `App\Http\Middleware\ForgetFlashedInput` drops the flashed input
+wholesale. An enumeration of field names cannot track a schema — it can only look as though it
+does, which is the failure this actually was — so the rule became *flash nothing*, which has
+nothing to keep in step. It costs nothing here: no Blade template calls `old()`, and Vue form state
+survives a failed submit inside the component.
+
+`tests/Feature/FlashedInputTest.php` asserts the session carries **nothing**, in those terms, so a
+field added next year is covered without anyone remembering to come back to it.
+
 ## The checklist, and what it did not find
 
 Recorded because "we checked and it was fine" is information, and because the next person to look
@@ -198,7 +237,7 @@ should know which ground has been covered.
 | **Dependencies** | No finding. `composer audit` and `npm audit --audit-level=moderate` both clean and both run in CI on every commit. The three `@noble` packages are now pinned to exact versions rather than caret ranges, so a routine install cannot float the primitives; everything else is caret-ranged and locked. TypeScript stays on 5.x deliberately ([ADR-0002](adr/0002-pin-typescript-5.md)). |
 | **File upload** | No finding. Chunks are opaque ciphertext written to a random UUID path with no extension and never served with a content type; index bounds are enforced with `whereNumber` on the route and a check in the controller; each chunk's index and its file's chunk count are bound into the AEAD associated data, so truncation and reordering fail the tag rather than an application check. |
 | **Audit integrity** | No finding. Chain verification, append-only enforcement and the daily external anchor were built and tested in Phase 7; nothing here weakened them. |
-| **Error handling** | No finding. Exception reports and flashed input exclude every credential field. The failure notice that replaced Inertia's dialog deliberately shows a status code and not the response body. |
+| **Error handling** | Finding F11 — and worth noting that this row originally read "flashed input excludes every credential field", which was written from the `dontFlash` list rather than from a request. It was true of the list and false of the application. The failure notice that replaced Inertia's dialog does deliberately show a status code and not the response body. |
 
 ## Timing measurements
 

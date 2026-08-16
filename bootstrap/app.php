@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\ForgetFlashedInput;
 use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Middleware\SecurityHeaders;
 use Illuminate\Foundation\Application;
@@ -20,6 +21,7 @@ return Application::configure(basePath: dirname(__DIR__))
             SecurityHeaders::class,
         ], append: [
             HandleInertiaRequests::class,
+            ForgetFlashedInput::class,
         ]);
 
         /*
@@ -45,19 +47,20 @@ return Application::configure(basePath: dirname(__DIR__))
         );
 
         /*
-         | Flashed input survives a redirect in the session, and exception
-         | reports carry it off the box entirely. Nothing here may ever be
-         | written down. Entries are listed ahead of the fields existing
-         | (Phase 2 adds them) precisely because this is the kind of guardrail
-         | that gets remembered only after it was needed. See SR1.
+         | There is deliberately no `dontFlash()` list here.
+         |
+         | One lived at this spot from Phase 0 until Phase 11.5, naming seven
+         | fields. Three of them — `current_password`, `master_password`,
+         | `recovery_code` — were written before the schema existed and by the
+         | end named nothing in the application at all, while `payload_ct`,
+         | `wrapped_item_key` and `recovery_auth_key` had all arrived without
+         | being added. It was guarding a form that was never built.
+         |
+         | An enumerated list of field names is the wrong shape for this
+         | problem: it drifts silently, and a stale one reads exactly like a
+         | current one. App\Http\Middleware\ForgetFlashedInput drops the
+         | flashed input wholesale instead — nothing to keep in step, and
+         | nothing a new field can be forgotten from. See SR1, and
+         | docs/07-penetration-test.md F11.
          */
-        $exceptions->dontFlash([
-            'auth_key',
-            'current_password',
-            'master_password',
-            'password',
-            'password_confirmation',
-            'recovery_code',
-            'wrapped_user_key',
-        ]);
     })->create();

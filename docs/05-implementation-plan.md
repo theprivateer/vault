@@ -189,6 +189,49 @@ factor, invite-only onboarding.
   key material. Write this test now; it guards every later phase.
 - Throttling tests: N failed logins lock the account and the IP.
 
+### Carried forward from Phase 2
+
+*Written after Phase 11, when the plan was swept for work that had dropped between phases. Phases
+5 onward each recorded what they left behind; phases 0–4 recorded nothing, which is why both items
+worth finding turned out to be in this half.*
+
+All eleven tasks are built and every exit criterion has a passing test — **except one clause of
+task 9**, which asked for "a high-severity log line **and email notification**" on recovery. The
+log line was built in Phase 2. The email was not, and nothing between here and Phase 11 noticed.
+
+That gap is worse than it sounds, and the reason is the same reason the plan asked for it. Every
+in-product signal that an account has been taken — the activity feed, where `auth.recovery_used`
+was deliberately written to be read — sits behind the credential the taker now holds. Recovery is
+the one flow that grants a session without the password, so an attacker with the kit gets the
+account, the session, and the view of the record saying so. Email is the only channel this
+application has that a successful takeover does not also control.
+
+`App\Notifications\AccountSecurityAlert` now carries `auth.recovery_used` and
+`auth.password_changed` out of band, and nothing else: an alert that arrives for ordinary activity
+is an alert people filter, and the one message that matters would be filtered with it. Three
+decisions inside it are worth naming.
+
+- **It is sent synchronously.** `QUEUE_CONNECTION=database` needs a worker, and a security alert
+  queued on a deployment where nobody started one is worse than none — the operator believes the
+  channel exists. The cost is a few hundred milliseconds on two rare endpoints.
+- **A send failure cannot fail the request.** The alert goes out after the session is granted and
+  the password already changed, so a mail host that is down must not turn a locked-out user away at
+  the last step. That would turn broken SMTP into a broken recovery flow, and recovery is the flow
+  with no second way through. Logged loudly instead, with no address and no message body.
+- **It carries no originating IP**, though it easily could. `audit_events` keeps only `ip_hash`; an
+  address the log deliberately declined to store is not one to put in somebody's inbox.
+
+The failure paths are silent, which is a security property rather than noise control: an alert on
+every wrong recovery attempt is a way to flood an inbox by typing an address, and it confirms to
+the sender that the address has an account — the enumeration SR6 forbids. `SecurityAlertTest.php`
+asserts that, and asserts the recovery alert is not followed by a password-change one for the
+change that same flow forces.
+
+**Not built, and a deliberate scope line:** identity rotation sends nothing. It invalidates every
+peer's pin, which is disruptive, but it is an act by the account holder that does not signal
+anybody else holds the account — and the peers who need to know are told by the hard-stop
+interstitial rather than by email.
+
 ---
 
 ## Phase 3 — Vaults, lockboxes, secrets
@@ -736,6 +779,14 @@ Three things are outstanding and none of them is code:
   and the command finishes by saying that structure is all it checked: whether the ciphertext still
   opens is answered by signing in to the restore and unlocking a real vault. That is Phase 12,
   task 2.
+
+**One finding arrived after the phase closed**, from sweeping this plan rather than the
+application: [F11](07-penetration-test.md), where a `dontFlash` list written in Phase 0 had drifted
+so far from the schema that a routine concurrent edit was writing two wrapped Item Keys into the
+session store. It is fixed by dropping flashed input wholesale rather than by lengthening the list,
+because the failure was the enumeration and not its contents. The same sweep tested
+`resources/js/lib/title.ts`, which shipped in Phase 11 without one, and found that `APP_NAME` was
+still `Laravel` — so every browser tab in the product had been reading the framework's name.
 
 Two residual risks were accepted rather than fixed, with the reasoning in
 [07 § Residual risk](07-penetration-test.md#residual-risk-accepted): a timing difference that

@@ -1,6 +1,7 @@
 ---
 paths:
   - 'docs/**'
+  - docs/05-implementation-plan.md
 ---
 
 # Docs
@@ -24,3 +25,10 @@ verified — a requirement that claims a test it does not have reads as evidence
 Cross-doc anchors are generated from heading text, so appending a status marker ("### Files (Phase 6, not yet built)") silently breaks every `#files` link pointing at it. Put status in an italic line *under* the heading instead, and keep the heading itself stable.
 
 Anchors are not checked by any gate. After editing headings, verify links resolve before finishing.
+
+## Every phase ends with a "Carried forward" section, including the ones already done
+When a phase closes, append a "Carried forward from Phase N" section naming what was built, what departed from the task list and why, and what was left undone.
+
+This is not bookkeeping. Phases 5–11 each had one; 0–4 did not, and both items found in the post-Phase-11 sweep were in that half — a `dontFlash` list that drifted for eleven phases (F11), and task 9's "and email notification", which was simply never built. A task list with ticks and no prose cannot show you the clause that got dropped mid-sentence.
+
+Say what is outstanding even when the answer is "nothing from this phase's own list".
