@@ -115,6 +115,7 @@ describe('creating and reopening a vault', () => {
             keyEpoch: 1,
             updatedAt: null,
             history: { maxVersions: 20, maxAgeDays: 180, isDefault: true },
+            rotation: { rotatedAt: null, afterDays: 0, dueAt: null, isDue: false, isDefault: true },
             membership: {
                 uuid: MEMBERSHIP_UUID,
                 role: 'owner',
@@ -280,6 +281,7 @@ describe('associated data binding', () => {
                 keyEpoch: 1,
                 updatedAt: null,
                 history: { maxVersions: 20, maxAgeDays: 180, isDefault: true },
+                rotation: { rotatedAt: null, afterDays: 0, dueAt: null, isDue: false, isDefault: true },
                 membership: {
                     // Someone else's row, carrying this key.
                     uuid: LOCKBOX_UUID,

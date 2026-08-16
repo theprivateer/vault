@@ -17,7 +17,15 @@ import {
 import type { AuditStatement, SignedStatement } from '../audit';
 import type { Grant, SignedGrant } from '../grant';
 import type { RegistrationResult } from './keyring';
-import type { BulkOpenItem, BulkOpenResult, KeyHandle, Reply, Request, SerialisedError } from './protocol';
+import type {
+    BulkOpenItem,
+    BulkOpenResult,
+    KeyHandle,
+    Reply,
+    Request,
+    RotationResult,
+    SerialisedError,
+} from './protocol';
 
 /** A bulk open result, with its error rebuilt into a real class. */
 export type OpenedBytes = { ok: true; bytes: Uint8Array } | { ok: false; error: CryptoError };
@@ -205,6 +213,21 @@ export class CryptoClient {
         recoveryAuthKey: Uint8Array;
     }> {
         return this.send({ op: 'issueRecoveryKit', userKeyAad });
+    }
+
+    /**
+     * Replaces the identity keys and re-seals every Vault Key to the new pair.
+     *
+     * Returns the private halves only as ciphertext under the User Key, so
+     * nothing about the new identity reaches this thread in the clear. The
+     * keyring still holds the *old* keys afterwards — deliberately, since the
+     * server may refuse the submission — so the caller loads the new ones from
+     * this result once the write has landed.
+     */
+    async rotateIdentity(
+        request: Omit<Extract<Request, { op: 'rotateIdentity' }>, 'op'>,
+    ): Promise<RotationResult> {
+        return this.send({ op: 'rotateIdentity', ...request });
     }
 
     async status(): Promise<{ unlocked: boolean; handles: KeyHandle[] }> {

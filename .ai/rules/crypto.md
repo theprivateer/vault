@@ -5,6 +5,8 @@ paths:
   - resources/js/crypto/grant.ts
   - resources/js/crypto/chunks.ts
   - resources/js/crypto/audit.ts
+  - resources/js/crypto/envelope.ts
+  - resources/js/crypto/rotation.ts
 ---
 
 # Crypto
@@ -53,3 +55,19 @@ Domain separator `vault:audit:v1`, distinct from `vault:grant:v1`. Both are Ed25
 `signed_payload` is stored verbatim and `parse` must never re-canonicalise and compare — that would invalidate every signature the day the format changes. Safety comes from the version check plus comparing the signed fields against the event being recorded.
 
 Reporting is fire-and-forget and swallows failures on purpose (`lib/audit.ts`). A secret that was revealed was revealed; a failed report does not un-reveal it, and an error over a working feature teaches people to ignore errors.
+
+## Envelope v2 authenticates its own header; v1 is still read
+`seal` writes version 2, which appends `0x00 ‖ ver ‖ alg` to the associated data. In v1 those bytes sat outside it, so a downgrade failed only because the tag happened not to verify under the other code path — accidental rather than designed.
+
+`open` accepts 1 and 2 and dispatches the AAD construction on the version byte it reads. That is safe *because* the tag then validates the choice: a v2 envelope relabelled v1 is opened with the v1 AAD and fails. Do not "harden" this by refusing to dispatch.
+
+Never remove 1 from `Envelope::SUPPORTED_VERSIONS` (PHP) or `SUPPORTED_ENVELOPE_VERSIONS` (TS). There is no migration — the server cannot decrypt — so rows re-seal at v2 only when a client writes them, and a payload nobody edits stays on v1 forever. Dropping v1 makes those rows unreadable, and refuses the very write that would have upgraded them. `vault:health` counts them.
+
+## A rotation certificate changes the wording, never the verdict
+`checkIdentity` returns `certified: true` when the keys a peer pinned signed a notice introducing the new ones — and the status stays `changed`. There is no path to an accept, and there must not be: whoever stole the old key signs a perfectly valid notice, which is the case rotation most often exists for. Continuity of key is not continuity of person.
+
+Order matters in `changed()`: recompute the fingerprint of the *retired* keys the server supplied and compare it against the local pin **before** verifying anything. Verifying a notice against a key the server chose is asking the forger whether the forgery is genuine.
+
+Exactly one link is followed. Do not add a chain walk — a peer whose pin is two rotations stale has missed a conversation, and re-verifying out of band is the honest answer rather than a longer chain of the server's own assertions.
+
+Signed by the key being *retired*. A notice signed by the incoming key attests only that the incoming key exists.

@@ -68,6 +68,23 @@ class HandleInertiaRequests extends Middleware
                 'identity' => $user instanceof User ? $user->identity?->toOwnerBundle() : null,
 
                 /*
+                 | Fingerprints this account used to have, oldest first (Phase 10).
+                 |
+                 | A grant names the fingerprint it was issued to, so after a
+                 | rotation every grant somebody made you would otherwise fail to
+                 | verify and every shared vault would render as a warning — for
+                 | a change you made yourself.
+                 |
+                 | Taking this list from the server is safe, which is worth being
+                 | precise about: it can only ever let a check *succeed*, and a
+                 | check still needs a granter signature over a grant naming both
+                 | that fingerprint and your account. A server inventing entries
+                 | here would have to forge one of those, which is the thing it
+                 | cannot do.
+                 */
+                'previousFingerprints' => $user instanceof User ? $user->previousFingerprints() : [],
+
+                /*
                  | The encrypted record of whose public keys this user has
                  | verified, alongside the identity it is opened with.
                  |

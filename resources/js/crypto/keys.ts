@@ -11,7 +11,7 @@
  *
  * Spec: docs/03-cryptographic-design.md
  */
-import { x25519 } from '@noble/curves/ed25519.js';
+import { ed25519, x25519 } from '@noble/curves/ed25519.js';
 
 import type { AadParams } from './aad';
 import { decodeBase32, encodeBase32, group } from './encoding';
@@ -170,6 +170,23 @@ export function deriveRecoveryKeys(formattedCode: string, salt: Uint8Array): Rec
 export interface KeyPair {
     publicKey: Uint8Array;
     secretKey: Uint8Array;
+}
+
+/**
+ * The public half of a held X25519 private key.
+ *
+ * Needed because the keyring stores private keys and nothing else: a rotation
+ * has to name the fingerprint it is retiring, and a fingerprint is computed from
+ * public keys. Re-deriving is the honest way to get them — the alternative is
+ * carrying the public halves alongside, where they could drift out of step with
+ * the private ones and produce a certificate that retires a key nobody held.
+ */
+export function x25519PublicKeyOf(secretKey: Uint8Array): Uint8Array {
+    return x25519.getPublicKey(secretKey);
+}
+
+export function ed25519PublicKeyOf(secretKey: Uint8Array): Uint8Array {
+    return ed25519.getPublicKey(secretKey);
 }
 
 export function generateX25519KeyPair(): KeyPair {

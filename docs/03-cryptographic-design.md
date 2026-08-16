@@ -106,11 +106,56 @@ Every ciphertext at rest, other than file bodies, uses one binary envelope:
 │ ver    │ alg    │ nonce        │ ciphertext            │ tag      │
 │ 1 byte │ 1 byte │ 24 bytes     │ variable              │ 16 bytes │
 └────────┴────────┴──────────────┴───────────────────────┴──────────┘
-  0x01     0x01 = XChaCha20-Poly1305
+  0x02     0x01 = XChaCha20-Poly1305
 ```
 
 `ver` allows the envelope structure to change; `alg` allows the primitive to change. A decryptor
 rejects anything it does not recognise with a specific error — never a silent fallback.
+
+**Version 2 authenticates its own header**, which version 1 did not. In v1 the two header bytes sat
+outside the associated data: nothing in the construction said they could not be edited, and a
+downgrade attempt failed only because the tag happened not to verify under the other code path. True,
+and accidental. Version 2 appends `0x00 ‖ ver ‖ alg` to the AAD, so the version byte selects the
+construction and the AEAD tag then validates that selection — which is what makes dispatching on an
+attacker-controlled byte safe.
+
+Both versions are opened and only version 2 is written.
+
+### Migrating between envelope versions
+
+No server-side migration is possible: this server cannot decrypt, so it cannot re-seal. Two things
+move rows instead, and they cover different halves.
+
+**Wrapped keys move with a re-key.** A rotation unwraps every Item Key and re-wraps it through
+`seal`, so one rotation brings every `wrapped_item_key` and every member's `wrapped_vault_key` onto
+the current version as a side effect of an operation people already perform.
+
+**Payloads move with a re-seal**, which is its own operation because nothing else would do it. "Re-wrap
+lazily on write" is true and is not a migration: in a password manager the payloads nobody edits are
+the majority and the long-lived ones, so on its own it means "never, for exactly the data that matters
+most". The browser opens each payload, generates a fresh Item Key, and seals the *same bytes* again.
+
+Three properties separate a re-seal from every other write, and each one is a decision:
+
+- **It carries a compare-and-swap.** Each item ships the BLAKE2b digest of the ciphertext its
+  plaintext came out of, and the server applies the write only while the row still holds it. Without
+  that, a tab that decrypted an hour ago would write hour-old plaintext back under a fresh envelope —
+  and every check downstream would pass, because the result is well formed, correctly bound and
+  genuinely freshly sealed. Only the bytes it replaced would know it was wrong.
+- **It is not an edit.** No version is archived, `current_version` does not move, `updated_at` is
+  untouched, and the log records one `vault.resealed` with a count rather than a run of changes that
+  never happened.
+- **It is deliberately not atomic**, unlike a re-key. A half-applied rotation strands keys; a
+  half-applied re-seal leaves every row on one version or the other, and both open. So it batches,
+  resumes and can be abandoned midway with nothing to repair.
+
+**Archived versions can never move.** `secret_versions` is immutable by design — an archive that
+could be rewritten is a rollback channel for a credential somebody rotated *because* it leaked — so
+those rows stay on version 1 until retention removes them. `vault:health` counts them apart from the
+movable ones, because a number that cannot reach zero is a number people stop reading.
+
+Dropping support for version 1 would make every remaining row unreadable rather than upgraded, and
+would refuse the very write that would have upgraded it.
 
 **Stored base64-encoded in `text` columns, not as `BLOB`/`BYTEA`.** Postgres hands `BYTEA` back as
 a stream resource while SQLite hands back a string, and that difference would surface only in
@@ -703,6 +748,76 @@ hardenings, both real and neither a solution:
   and on `pagehide`. Locking terminates the Worker, which is the most reliable erasure available.
 - Clipboard copies clear after 30 seconds where the Clipboard API permits.
 
+## Identity key rotation
+
+Replacing a user's X25519/Ed25519 pair, and **self-service** — which is the property worth
+understanding rather than the mechanics.
+
+Every Vault Key a user holds is sealed to their X25519 public key on their own membership row, and
+they still hold the matching private key. So their browser can open each one and re-seal it to a
+fresh pair without any vault owner acting, without a single Vault Key changing, and without one
+payload being re-encrypted. The server receives a public bundle and a complete set of re-sealed
+membership keys, none of which it can read.
+
+1. The Worker generates a fresh identity, opens every sealed Vault Key with the outgoing X25519
+   private key, and re-seals each under **the same associated data** — bound to the membership's own
+   UUID, which does not change, so a rotation cannot become a way to move a key onto another row.
+2. The new private keys are sealed under the User Key and returned as ciphertext. They never exist
+   in plaintext on the main thread.
+3. The whole set is submitted as one request. The server accepts it only if the membership set
+   matches the user's live memberships exactly — nothing missing, nothing extra.
+4. Only after the write lands does the client load the new private keys into the Worker.
+
+**Completeness is the entire defence.** The old private key is discarded when this lands, so a
+membership left out is a sealed Vault Key with no surviving key to open it: that vault becomes
+permanently unreadable for that user, silently, with the request having reported success. The same
+failure as a partial vault re-key, arriving from the other end of the hierarchy, and it gets the same
+refusal.
+
+### Rotation certificates
+
+A rotation invalidates every peer's pin, which by design produces a hard stop — a changed fingerprint
+is indistinguishable from a server substituting a key. That stop is correct and it stays. What it
+lacks is information: "they rotated" and "you are being attacked" arrive as the same red screen, and
+somebody shown the same screen for both learns to click through it.
+
+So the **outgoing** Ed25519 key signs a statement naming its successor:
+
+```
+payload   = {"v":1,"userUuid":…,"previousFingerprint":…,"fingerprint":…,"rotatedAt":…}
+signature = Ed25519( "vault:rotation:v1" ‖ 0x00 ‖ payload )
+```
+
+Domain-separated, for the same reason a grant is: a self-signature, a grant, an audit entry and this
+are all Ed25519 signatures by one key. Stored byte-exact in `user_identity_archive.rotation_payload`,
+never re-encoded — a signature verifies over bytes.
+
+A peer receiving a changed identity gets the retired *public keys* alongside the certificate, because
+a pin is a fingerprint and a fingerprint cannot verify a signature. They recompute the fingerprint
+from those two keys, compare it against their own pin, and only then does the signature mean
+anything — verifying against a key the server supplied would be asking the forger whether the forgery
+is genuine.
+
+**Three limits, all stated in the interface as well as here:**
+
+- **A compromised old key signs a perfect certificate**, which is the case rotation most often exists
+  for. A valid certificate is evidence about continuity of *key*, never of *person*, so it changes
+  the wording and never the verdict. There is no automatic accept.
+- It is served by the server, which is the adversary this layer detects. Only the comparison against
+  the local pin makes it evidence at all.
+- **Exactly one link is followed.** A peer whose pin is two rotations stale has not spoken to this
+  person across two key changes, and re-verifying out of band is the honest answer rather than a
+  longer chain of the server's own assertions.
+
+The user's own past fingerprints are kept for a second reason: a grant names the fingerprint it was
+issued to, so without them every grant made before a rotation would fail to verify and every shared
+vault would render as unverifiable — over a change the user made themselves.
+
+**What rotation does not do.** It does not rotate any Vault Key, so it removes nobody's access and
+does not help if a *vault* key leaked. If the reason is that the private key was stolen, whoever has
+it can still read anything they copied and can still open any Vault Key sealed to it before now; each
+vault's owner has to re-key as well.
+
 ## Parameter upgrades
 
 KDF parameters are per-user columns, not constants. When defaults are raised:
@@ -712,6 +827,24 @@ KDF parameters are per-user columns, not constants. When defaults are raised:
   Key, and submits new salt, params and auth key in one transaction.
 - Silent, no user action, no data re-encryption. The same mechanism serves an envelope version
   bump (`ver`/`alg`), re-wrapping lazily on write.
+
+Three things settled while building it in Phase 10:
+
+- **The upgrade endpoint demands the current auth key**, exactly as the password-change endpoint
+  does. Without it, injected script could ask the Worker to re-wrap the User Key under a password of
+  its own choosing and post the result — and the server, which cannot inspect the wrapping, has no
+  way to tell that request from a genuine upgrade. Proof of the current password is the only thing
+  separating them.
+- **It refuses parameters weaker than the account already uses or than the deployment requires.** An
+  upgrade endpoint that accepts a downgrade is a downgrade endpoint, and nothing else in the system
+  would notice an account quietly moved to 8 MiB and one pass.
+- **Compared per parameter, never as a combined cost.** A single cost function would let a raised
+  memory bound be satisfied by more passes, and memory hardness is what makes Argon2id expensive on
+  the hardware an attacker would actually rent.
+
+Login is also the only moment the upgrade is possible: re-wrapping needs a KEK, a KEK needs the
+password, and the password exists in the browser for the length of one form submission. A settings
+page could not offer it without asking for the password again, at which point it is not silent.
 
 ## Explicitly rejected
 

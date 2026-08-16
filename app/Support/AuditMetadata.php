@@ -80,6 +80,14 @@ final class AuditMetadata
         /** How many items an operation covered, e.g. secrets deleted with a
          *  lockbox. A count, never a list of names. */
         'count' => 'int',
+
+        /** The Argon2id parameters an account was moved to. Already plaintext
+         *  columns on `users`, identical for any two accounts on the same
+         *  deployment defaults, and the only way to read "was this account
+         *  upgraded, and to what" out of the log years later. */
+        'kdf_m' => 'int',
+        'kdf_t' => 'int',
+        'kdf_p' => 'int',
     ];
 
     /**

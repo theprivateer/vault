@@ -94,6 +94,19 @@ export interface ChunkRequest {
     aad: ChunkAadParams;
 }
 
+/**
+ * One membership's sealed Vault Key, on its way from the old identity to the new.
+ *
+ * The AAD binds to the membership's own UUID and does not change across a
+ * rotation — the row is the same row — so the re-seal uses the same associated
+ * data the original did. That is what keeps a rotated key from being movable
+ * onto somebody else's membership afterwards.
+ */
+export interface SealedMembership {
+    uuid: string;
+    sealed: Uint8Array;
+}
+
 export type Request =
     | {
           op: 'unlock';
@@ -129,6 +142,21 @@ export type Request =
           userKeyAad: AadParams;
       }
     | { op: 'issueRecoveryKit'; userKeyAad: AadParams }
+    /*
+     | Replacing the identity keys (Phase 10).
+     |
+     | One op rather than several, because the pieces are only correct together:
+     | a fresh pair, every sealed Vault Key re-sealed to it, the private halves
+     | wrapped under the User Key, and a certificate signed by the key being
+     | retired. Splitting it would create a `sealToPublicKey` on the identity
+     | keys — the exact operation `UNSEALABLE` exists to refuse.
+     |
+     | It deliberately does **not** swap the held keys. The server may reject the
+     | submission, and a Worker holding keys the server has never seen would be
+     | unable to open a single membership. The caller reloads the identity from
+     | the ciphertexts this returns, once the write has landed.
+     */
+    | { op: 'rotateIdentity'; uuid: string; rotatedAt: string; memberships: SealedMembership[] }
     | { op: 'lock' }
     | { op: 'status' }
     | { op: 'seal'; handle: KeyHandle; plaintext: Uint8Array; aad: AadParams }
@@ -195,7 +223,29 @@ export type ResponseFor<R extends Request['op']> = R extends 'status'
           ? { authKey: Uint8Array }
           : R extends 'signGrant' | 'signAuditStatement'
             ? { payload: string; signature: Uint8Array }
-            : Record<string, never>;
+            : R extends 'rotateIdentity'
+              ? RotationResult
+              : Record<string, never>;
+
+/**
+ * Everything a rotation submission needs, and no private key bytes.
+ *
+ * The new private keys leave only as ciphertext under the User Key — the same
+ * form the server will store — so they never exist in plaintext on the main
+ * thread. The caller unwraps them again through the ordinary identity-loading
+ * path once the write has landed.
+ */
+export interface RotationResult {
+    x25519PublicKey: Uint8Array;
+    ed25519PublicKey: Uint8Array;
+    x25519PrivateKeyCt: Uint8Array;
+    ed25519PrivateKeyCt: Uint8Array;
+    selfSignature: Uint8Array;
+    fingerprint: Uint8Array;
+    /** Signed by the key being retired, so peers can tell rotation from substitution. */
+    certificate: { payload: string; signature: Uint8Array };
+    memberships: { uuid: string; wrappedVaultKey: Uint8Array }[];
+}
 
 export interface Envelope<T> {
     /** Correlates a response with its request. */

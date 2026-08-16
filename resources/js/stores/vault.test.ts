@@ -105,6 +105,7 @@ async function seedVault(
         keyEpoch: 1,
         updatedAt: null,
         history: { maxVersions: 20, maxAgeDays: 180, isDefault: true },
+        rotation: { rotatedAt: null, afterDays: 0, dueAt: null, isDue: false, isDefault: true },
         membership: {
             uuid: MEMBERSHIP_UUID,
             role: 'owner',

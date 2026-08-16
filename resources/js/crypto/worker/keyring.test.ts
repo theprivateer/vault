@@ -2,11 +2,14 @@ import { describe, expect, it } from 'vitest';
 
 import type { AadParams } from '../aad';
 import { IntegrityError, KeyUnavailableError } from '../errors';
+import { fingerprintHex } from '../grant';
 import { computeFingerprint, verifyPublicKeys } from '../identity';
-import { deriveFromPassword, generateKdfSalt, generateKey, wrapKey } from '../keys';
+import { deriveFromPassword, generateKdfSalt, generateKey, openSealed, sealTo, wrapKey } from '../keys';
 import { utf8ToBytes } from '../primitives';
+import { verifyRotation } from '../rotation';
+import type { RegistrationResult } from './keyring';
 import { Keyring } from './keyring';
-import { USER_KEY } from './protocol';
+import { ED25519_KEY, USER_KEY, X25519_KEY } from './protocol';
 
 const FAST_KDF = { m: 8, t: 1, p: 1 };
 
@@ -419,5 +422,218 @@ describe('recovery kit reissue', () => {
 
     it('refuses to issue a kit while locked', () => {
         expect(() => new Keyring().issueRecoveryKit(userKeyAad)).toThrow(KeyUnavailableError);
+    });
+});
+
+/**
+ * Identity rotation (Phase 10).
+ *
+ * The operation with the worst failure mode in the system: the old X25519
+ * private key is discarded when a rotation lands, so a membership whose sealed
+ * Vault Key was not re-sealed becomes a vault the user can never open again.
+ * There is no error and nothing to recover from. That is why the server refuses
+ * an incomplete set, and why the re-sealing here is checked by actually opening
+ * the result rather than by measuring it.
+ */
+describe('identity rotation', () => {
+    const UUID = '0192f3a1-4b2c-7d3e-8f90-a1b2c3d4e5f6';
+    const MEMBERSHIP = '0192f3a1-4b2c-7d3e-8f90-a1b2c3d4e5fa';
+    const OTHER_MEMBERSHIP = '0192f3a1-4b2c-7d3e-8f90-a1b2c3d4e5fb';
+
+    const membershipAad = (subject: string): AadParams => ({
+        context: 'vault.membership.key',
+        subject,
+        version: 1,
+    });
+
+    const privateKeyAad = (context: 'user.privkey.x25519' | 'user.privkey.ed25519'): AadParams => ({
+        context,
+        subject: UUID,
+        version: 1,
+    });
+
+    /** An account with its identity keys loaded, as unlock leaves it. */
+    function registered(): { keyring: Keyring; identity: RegistrationResult } {
+        const keyring = new Keyring();
+        const identity = keyring.register({
+            password: 'correct horse',
+            kdfSalt: generateKdfSalt(),
+            kdfParams: FAST_KDF,
+            uuid: UUID,
+        });
+
+        keyring.unwrapInto(
+            X25519_KEY,
+            USER_KEY,
+            identity.x25519PrivateKeyCt,
+            privateKeyAad('user.privkey.x25519'),
+        );
+        keyring.unwrapInto(
+            ED25519_KEY,
+            USER_KEY,
+            identity.ed25519PrivateKeyCt,
+            privateKeyAad('user.privkey.ed25519'),
+        );
+
+        return { keyring, identity };
+    }
+
+    function rotate(keyring: Keyring, memberships: { uuid: string; sealed: Uint8Array }[] = []) {
+        return keyring.rotateIdentity({ uuid: UUID, rotatedAt: '2026-08-16T09:00:00Z', memberships });
+    }
+
+    it('publishes a fresh, self-consistent identity', () => {
+        const result = rotate(registered().keyring);
+
+        expect(verifyPublicKeys(result.selfSignature, result.ed25519PublicKey, result.x25519PublicKey)).toBe(
+            true,
+        );
+        expect(computeFingerprint(result.ed25519PublicKey, result.x25519PublicKey)).toEqual(
+            result.fingerprint,
+        );
+    });
+
+    it('replaces the keys rather than republishing them', () => {
+        const { keyring, identity } = registered();
+        const result = rotate(keyring);
+
+        expect(result.x25519PublicKey).not.toEqual(identity.x25519PublicKey);
+        expect(result.ed25519PublicKey).not.toEqual(identity.ed25519PublicKey);
+        expect(result.fingerprint).not.toEqual(identity.fingerprint);
+    });
+
+    /*
+     | The heart of it, and the reason rotation is self-service: the user still
+     | holds their *old* private key, so their own browser can move every sealed
+     | Vault Key across. No vault owner is involved and no Vault Key changes.
+     |
+     | Checked by opening the re-sealed value with the new private key and
+     | comparing the bytes, because a length assertion would pass just as
+     | happily on a re-seal of something else entirely.
+     */
+    it('moves each vault key to the new identity, byte for byte', () => {
+        const { keyring, identity } = registered();
+        const vaultKey = generateKey();
+
+        const sealed = sealTo(identity.x25519PublicKey, vaultKey, membershipAad(MEMBERSHIP));
+        const result = rotate(keyring, [{ uuid: MEMBERSHIP, sealed }]);
+
+        expect(result.memberships).toHaveLength(1);
+        expect(result.memberships[0]!.uuid).toBe(MEMBERSHIP);
+
+        expect(
+            openSealed(
+                keyring.open(USER_KEY, result.x25519PrivateKeyCt, privateKeyAad('user.privkey.x25519')),
+                result.memberships[0]!.wrappedVaultKey,
+                membershipAad(MEMBERSHIP),
+            ),
+        ).toEqual(vaultKey);
+    });
+
+    /*
+     | The associated data is the membership's own UUID and does not change
+     | across a rotation — the row is the same row. Re-sealing under a different
+     | subject would make a rotation a way to move somebody's key onto another
+     | membership, which is exactly what the AAD binding exists to prevent (SR4).
+     */
+    it('keeps each key bound to its own membership', () => {
+        const { keyring, identity } = registered();
+        const vaultKey = generateKey();
+
+        const sealed = sealTo(identity.x25519PublicKey, vaultKey, membershipAad(MEMBERSHIP));
+        const result = rotate(keyring, [{ uuid: MEMBERSHIP, sealed }]);
+
+        const newPrivateKey = keyring.open(
+            USER_KEY,
+            result.x25519PrivateKeyCt,
+            privateKeyAad('user.privkey.x25519'),
+        );
+
+        expect(() =>
+            openSealed(
+                newPrivateKey,
+                result.memberships[0]!.wrappedVaultKey,
+                membershipAad(OTHER_MEMBERSHIP),
+            ),
+        ).toThrow(IntegrityError);
+    });
+
+    it('carries every membership it was given, in order', () => {
+        const { keyring, identity } = registered();
+
+        const memberships = [MEMBERSHIP, OTHER_MEMBERSHIP].map((uuid) => ({
+            uuid,
+            sealed: sealTo(identity.x25519PublicKey, generateKey(), membershipAad(uuid)),
+        }));
+
+        expect(rotate(keyring, memberships).memberships.map((entry) => entry.uuid)).toEqual([
+            MEMBERSHIP,
+            OTHER_MEMBERSHIP,
+        ]);
+    });
+
+    /*
+     | Signed by the key being retired, which is the whole value of the
+     | certificate: a peer holding the old fingerprint can tell "they rotated"
+     | from "the server substituted a key". A certificate signed by the new key
+     | would attest only that the new key exists.
+     */
+    it('certifies the new keys with the retired Ed25519 key', () => {
+        const { keyring, identity } = registered();
+        const result = rotate(keyring);
+
+        expect(
+            verifyRotation(
+                result.certificate.signature,
+                result.certificate.payload,
+                identity.ed25519PublicKey,
+                {
+                    userUuid: UUID,
+                    previousFingerprint: fingerprintHex(identity.fingerprint),
+                    fingerprint: fingerprintHex(result.fingerprint),
+                },
+            ).certified,
+        ).toBe(true);
+    });
+
+    /*
+     | The keyring still holds the *old* keys afterwards, deliberately. The
+     | server may refuse the submission, and a Worker holding keys the server has
+     | never seen could not open a single membership — the user would be locked
+     | out of everything by an operation that failed.
+     */
+    it('leaves the held keys alone until the write has landed', () => {
+        const { keyring, identity } = registered();
+        const vaultKey = generateKey();
+        const sealed = sealTo(identity.x25519PublicKey, vaultKey, membershipAad(MEMBERSHIP));
+
+        rotate(keyring, [{ uuid: MEMBERSHIP, sealed }]);
+
+        // The old sealed key still opens with the still-held old private key.
+        keyring.openSealedInto('vault:test', X25519_KEY, sealed, membershipAad(MEMBERSHIP));
+
+        expect(keyring.handles).toContain('vault:test');
+    });
+
+    it('refuses to rotate a locked keyring', () => {
+        expect(() => rotate(new Keyring())).toThrow(KeyUnavailableError);
+    });
+
+    /*
+     | An unlocked account whose identity keys were never loaded cannot rotate:
+     | it has nothing to open the old sealed keys with, and nothing to sign the
+     | certificate. Failing here is right — the alternative is a rotation that
+     | strands every membership it could not read.
+     */
+    it('refuses when the identity keys are not loaded', () => {
+        const keyring = new Keyring();
+        keyring.register({
+            password: 'correct horse',
+            kdfSalt: generateKdfSalt(),
+            kdfParams: FAST_KDF,
+            uuid: UUID,
+        });
+
+        expect(() => rotate(keyring)).toThrow(KeyUnavailableError);
     });
 });

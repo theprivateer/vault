@@ -15,6 +15,7 @@ import { describe, expect, it } from 'vitest';
 
 import { canonicaliseGrant, fingerprintHex, signGrant, type Grant } from '@/crypto/grant';
 import { generateIdentity, signPublicKeys, type Identity } from '@/crypto/identity';
+import { rotationTimestamp, signRotation } from '@/crypto/rotation';
 
 import { toBase64 } from './bytes';
 import type { PinMap } from './pins';
@@ -308,6 +309,199 @@ describe('checkMembership', () => {
                 ownFingerprint,
                 VAULT_UUID,
                 pins,
+            ),
+        ).toMatchObject({ trusted: false, reason: 'grant' });
+    });
+});
+
+/**
+ * What a peer sees after somebody rotates (Phase 10).
+ *
+ * The hard stop stays a hard stop — nothing here can produce an accept, and the
+ * status is `changed` in every case below. What the certificate buys is the
+ * difference between "somebody substituted a key" and "they replaced theirs, and
+ * the keys you verified said so". Showing one screen for both is how a stop
+ * becomes something people click through.
+ */
+describe('a changed pin, with and without a rotation notice', () => {
+    const previous = generateIdentity();
+    const next = generateIdentity();
+
+    /** The bundle a server serves after this account rotated. */
+    function rotated(signer: Identity = previous, retired: Identity = previous): PublicIdentity {
+        const statement = {
+            userUuid: GRANTER_UUID,
+            previousFingerprint: fingerprintHex(retired.fingerprint),
+            fingerprint: fingerprintHex(next.fingerprint),
+            rotatedAt: rotationTimestamp(new Date('2026-08-16T09:00:00Z')),
+        };
+
+        const certificate = signRotation(signer.ed25519.secretKey, statement);
+
+        return {
+            ...published(next, GRANTER_UUID),
+            rotation: {
+                x25519PublicKey: toBase64(retired.x25519.publicKey),
+                ed25519PublicKey: toBase64(retired.ed25519.publicKey),
+                selfSignature: toBase64(retired.selfSignature),
+                fingerprint: toBase64(retired.fingerprint),
+                payload: certificate.payload,
+                signature: toBase64(certificate.signature),
+                rotatedAt: '2026-08-16T09:00:00Z',
+            },
+        };
+    }
+
+    it('still refuses, but says the keys you pinned introduced these ones', () => {
+        const check = checkIdentity(rotated(), pinned(GRANTER_UUID, previous));
+
+        expect(check.status).toBe('changed');
+        expect(check.certified).toBe(true);
+        expect(check.rotatedAt).toBe('2026-08-16T09:00:00Z');
+    });
+
+    it('is uncertified when there is no notice at all', () => {
+        const check = checkIdentity(published(next, GRANTER_UUID), pinned(GRANTER_UUID, previous));
+
+        expect(check.status).toBe('changed');
+        expect(check.certified).toBe(false);
+    });
+
+    /*
+     | The substitution the certificate must not launder. A server generating its
+     | own pair can also sign a notice with it — so the peer verifies against the
+     | keys *they* pinned, and a notice signed by anything else is worth nothing.
+     */
+    it('is uncertified when the notice is signed by a key you never pinned', () => {
+        const impostor = generateIdentity();
+
+        // The retired keys *are* the ones pinned, so this gets past the
+        // fingerprint check and fails on the signature — which is the step that
+        // has to hold when a server knows which keys you verified.
+        const check = checkIdentity(rotated(impostor, previous), pinned(GRANTER_UUID, previous));
+
+        expect(check.status).toBe('changed');
+        expect(check.certified).toBe(false);
+    });
+
+    /*
+     | The retired public keys arrive from the server too, so the first thing
+     | established is that they hash to the pin. Otherwise a server could serve a
+     | key of its own as "the one you verified" and certify its own substitution.
+     */
+    it('is uncertified when the retired keys are not the ones you pinned', () => {
+        const impostor = generateIdentity();
+
+        // Internally consistent — the impostor signed a notice retiring their
+        // own key — and still worth nothing, because those are not the keys this
+        // browser ever verified.
+        const check = checkIdentity(rotated(impostor, impostor), pinned(GRANTER_UUID, previous));
+
+        expect(check.certified).toBe(false);
+    });
+
+    it('is uncertified when the notice describes a different replacement', () => {
+        const elsewhere = generateIdentity();
+        const bundle = rotated();
+
+        const misdirected = signRotation(previous.ed25519.secretKey, {
+            userUuid: GRANTER_UUID,
+            previousFingerprint: fingerprintHex(previous.fingerprint),
+            fingerprint: fingerprintHex(elsewhere.fingerprint),
+            rotatedAt: '2026-08-16T09:00:00Z',
+        });
+
+        const check = checkIdentity(
+            {
+                ...bundle,
+                rotation: {
+                    ...bundle.rotation!,
+                    payload: misdirected.payload,
+                    signature: toBase64(misdirected.signature),
+                },
+            },
+            pinned(GRANTER_UUID, previous),
+        );
+
+        expect(check.certified).toBe(false);
+    });
+
+    it('ignores an unreadable notice rather than throwing', () => {
+        const bundle = rotated();
+
+        expect(
+            checkIdentity(
+                { ...bundle, rotation: { ...bundle.rotation!, signature: 'not base64 !!' } },
+                pinned(GRANTER_UUID, previous),
+            ).certified,
+        ).toBe(false);
+    });
+});
+
+/**
+ * Grants issued to an identity you have since replaced.
+ *
+ * A grant names the fingerprint it was issued for. Without this, rotating your
+ * own keys would make every vault anybody had shared with you render as
+ * unverifiable — over a change you made yourself, with nothing wrong.
+ */
+describe('checkMembership across your own rotation', () => {
+    const granter = generateIdentity();
+    const oldSelf = generateIdentity();
+    const newSelf = generateIdentity();
+
+    const grant: Grant = {
+        vaultUuid: VAULT_UUID,
+        recipientUuid: RECIPIENT_UUID,
+        recipientFingerprint: fingerprintHex(oldSelf.fingerprint),
+        role: 'editor',
+        keyEpoch: 1,
+        grantedAt: '2026-08-15T09:00:00Z',
+    };
+
+    const signed = signGrant(granter.ed25519.secretKey, grant);
+
+    const membership: MembershipRecord = {
+        uuid: MEMBERSHIP_UUID,
+        role: 'editor',
+        keyEpoch: 1,
+        acceptedAt: null,
+        grantSignature: toBase64(signed.signature),
+        grantPayload: signed.payload,
+        grantedBy: published(granter, GRANTER_UUID),
+        member: { uuid: RECIPIENT_UUID, displayName: 'Grace', handle: 'grace' },
+    };
+
+    const pins = pinned(GRANTER_UUID, granter);
+    const now = fingerprintHex(newSelf.fingerprint);
+    const before = fingerprintHex(oldSelf.fingerprint);
+
+    it('fails against the current fingerprint alone', () => {
+        expect(checkMembership(membership, now, VAULT_UUID, pins)).toMatchObject({
+            trusted: false,
+            reason: 'grant',
+        });
+    });
+
+    it('verifies against a fingerprint this account used to have', () => {
+        expect(checkMembership(membership, now, VAULT_UUID, pins, [before]).trusted).toBe(true);
+    });
+
+    /*
+     | A past fingerprint widens which of *your* identities a grant may name. It
+     | does not weaken the signature check, and this is the test that says so: a
+     | forged grant stays rejected however many identities are offered.
+     */
+    it('does not let a former identity rescue a forged grant', () => {
+        const forged = signGrant(generateIdentity().ed25519.secretKey, grant);
+
+        expect(
+            checkMembership(
+                { ...membership, grantSignature: toBase64(forged.signature), grantPayload: forged.payload },
+                now,
+                VAULT_UUID,
+                pins,
+                [before],
             ),
         ).toMatchObject({ trusted: false, reason: 'grant' });
     });

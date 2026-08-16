@@ -65,6 +65,32 @@ final readonly class Ciphertext implements Castable, JsonSerializable, Stringabl
         return strlen($this->bytes());
     }
 
+    /**
+     * The envelope version byte, or null if there is no readable header.
+     *
+     * **This is not a crack in SR2.** The header is two bytes of public metadata
+     * that say which construction was used — the same two bytes `App\Rules\
+     * Envelope` already validates on the way in — and reading them decrypts
+     * nothing. It exists so `vault:health` can count how much of the database is
+     * still on the old envelope, which is the only way to know whether an
+     * agility mechanism actually moved anything.
+     *
+     * Null for a sealed box, whose first 32 bytes are an ephemeral public key
+     * rather than a header. Callers that hold one know which they have; guessing
+     * from the length would be reading structure out of a blob, which is the
+     * habit this codebase does not want.
+     */
+    public function envelopeVersion(): ?int
+    {
+        $bytes = $this->bytes();
+
+        if (strlen($bytes) < 2) {
+            return null;
+        }
+
+        return ord($bytes[0]);
+    }
+
     public function jsonSerialize(): string
     {
         return $this->base64;

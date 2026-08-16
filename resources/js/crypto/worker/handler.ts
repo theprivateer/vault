@@ -62,6 +62,13 @@ export function createHandler(keyring: Keyring = new Keyring()): Handler {
             case 'issueRecoveryKit':
                 return keyring.issueRecoveryKit(request.userKeyAad);
 
+            case 'rotateIdentity':
+                return keyring.rotateIdentity({
+                    uuid: request.uuid,
+                    rotatedAt: request.rotatedAt,
+                    memberships: request.memberships,
+                });
+
             case 'lock':
                 keyring.lock();
 

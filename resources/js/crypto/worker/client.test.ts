@@ -523,6 +523,43 @@ describe('account lifecycle through the client', () => {
         expect((await fresh.client.status()).unlocked).toBe(true);
     });
 
+    /*
+     | The rotation result crosses the Worker boundary as ciphertext and public
+     | keys only — the new private halves are sealed under the User Key, exactly
+     | as the server will store them, so they never exist in plaintext on this
+     | thread. The keyring keeps the *old* keys until the write lands, which is
+     | what makes a rejected submission harmless.
+     */
+    it('rotates an identity without returning any private key bytes', async () => {
+        const { client } = clientWithWorker();
+        const account = await registration(client);
+
+        for (const [handle, wrapped, context] of [
+            [X25519_KEY, account.x25519PrivateKeyCt, 'user.privkey.x25519'],
+            [ED25519_KEY, account.ed25519PrivateKeyCt, 'user.privkey.ed25519'],
+        ] as const) {
+            await client.unwrapInto({
+                handle,
+                using: USER_KEY,
+                wrapped,
+                aad: { context, subject: UUID, version: 1 },
+            });
+        }
+
+        const result = await client.rotateIdentity({
+            uuid: UUID,
+            rotatedAt: '2026-08-16T09:00:00Z',
+            memberships: [],
+        });
+
+        expect(result.x25519PublicKey).toHaveLength(32);
+        expect(result.certificate.signature).toHaveLength(64);
+
+        // The private halves arrive as envelopes, not as keys.
+        expect(result.x25519PrivateKeyCt.length).toBeGreaterThan(32);
+        expect(result.x25519PrivateKeyCt.subarray(0, 32)).not.toEqual(result.x25519PublicKey);
+    });
+
     it('refuses to re-wrap or issue a kit while locked', async () => {
         const { client } = clientWithWorker();
 

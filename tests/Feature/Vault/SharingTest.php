@@ -284,6 +284,9 @@ describe('the identity directory', function () {
             'ed25519PublicKey' => $identity->ed25519_public_key->base64,
             'selfSignature' => $identity->self_signature->base64,
             'fingerprint' => $identity->fingerprint->base64,
+            // Null until this account rotates. Present as a key rather than
+            // absent, so the client has one shape to read instead of two.
+            'rotation' => null,
         ]);
     });
 

@@ -28,6 +28,8 @@ use Illuminate\Support\Facades\Config;
  * @property int $payload_version
  * @property int $key_epoch
  * @property ?Carbon $rekey_required_at
+ * @property ?Carbon $key_rotated_at
+ * @property ?int $rotate_after_days
  * @property ?int $history_max_versions
  * @property ?int $history_max_age_days
  */
@@ -45,6 +47,8 @@ class Vault extends Model
         'wrapped_item_key',
         'payload_version',
         'key_epoch',
+        'key_rotated_at',
+        'rotate_after_days',
         'history_max_versions',
         'history_max_age_days',
     ];
@@ -138,6 +142,41 @@ class Vault extends Model
     }
 
     /**
+     * How often this vault would like to be reminded to rotate, in days.
+     *
+     * Zero means never, and is a real answer rather than an absent one — the
+     * same distinction the history columns draw. Null defers to the deployment.
+     */
+    public function rotateAfterDays(): int
+    {
+        return $this->rotate_after_days ?? Config::integer('vault.rotation.after_days');
+    }
+
+    /**
+     * When this key becomes old enough to mention, or null if never.
+     *
+     * A reminder and nothing more. Nothing on the server can rotate a Vault Key,
+     * because unwrapping the current one needs a member's browser — so an
+     * overdue vault stays overdue until somebody opens it, and no job will
+     * quietly resolve it.
+     */
+    public function rotationDueAt(): ?Carbon
+    {
+        $days = $this->rotateAfterDays();
+
+        if ($days < 1 || $this->key_rotated_at === null) {
+            return null;
+        }
+
+        return $this->key_rotated_at->copy()->addDays($days);
+    }
+
+    public function isRotationDue(): bool
+    {
+        return $this->rotationDueAt()?->isPast() === true;
+    }
+
+    /**
      * What the browser needs in order to open this vault.
      *
      * Note what is *not* here: any associated data. The client builds its own
@@ -145,7 +184,7 @@ class Vault extends Model
      * hand over a ciphertext along with instructions to verify it against the
      * wrong record — which is precisely the binding AAD exists to provide.
      *
-     * @return array{uuid: string, payloadCt: string, wrappedItemKey: string, payloadVersion: int, keyEpoch: int, updatedAt: ?string, history: array{maxVersions: int, maxAgeDays: int, isDefault: bool}, membership: array{uuid: string, role: string, wrappedVaultKey: string, keyEpoch: int}}
+     * @return array{uuid: string, payloadCt: string, wrappedItemKey: string, payloadVersion: int, keyEpoch: int, updatedAt: ?string, rotation: array{rotatedAt: ?string, afterDays: int, dueAt: ?string, isDue: bool, isDefault: bool}, history: array{maxVersions: int, maxAgeDays: int, isDefault: bool}, membership: array{uuid: string, role: string, wrappedVaultKey: string, keyEpoch: int}}
      */
     public function toClientArray(VaultMembership $membership): array
     {
@@ -156,6 +195,19 @@ class Vault extends Model
             'payloadVersion' => $this->payload_version,
             'keyEpoch' => $this->key_epoch,
             'updatedAt' => $this->updated_at?->toIso8601String(),
+            /*
+             | How old this key is, and whether anyone asked to be told. The
+             | effective policy rather than the raw column, for the same reason
+             | as `history` below: a page showing "null" would be describing a
+             | setting instead of the behaviour.
+             */
+            'rotation' => [
+                'rotatedAt' => $this->key_rotated_at?->toIso8601String(),
+                'afterDays' => $this->rotateAfterDays(),
+                'dueAt' => $this->rotationDueAt()?->toIso8601String(),
+                'isDue' => $this->isRotationDue(),
+                'isDefault' => $this->rotate_after_days === null,
+            ],
             /*
              | The effective policy, not the raw columns: a page showing "null"
              | where a number is enforced would be describing a setting rather
@@ -200,6 +252,7 @@ class Vault extends Model
             'payload_ct' => Ciphertext::class,
             'wrapped_item_key' => Ciphertext::class,
             'rekey_required_at' => 'datetime',
+            'key_rotated_at' => 'datetime',
         ];
     }
 }

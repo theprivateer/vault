@@ -43,6 +43,8 @@ const props = defineProps<{
     vault: VaultRecord;
     items: RekeyItem[];
     members: RekeyMember[];
+    /** Whether a revocation demanded this, as against somebody choosing it. */
+    required: boolean;
 }>();
 
 const page = useShared();
@@ -60,6 +62,34 @@ const ownUuid = computed(() => page.props.auth.user?.uuid ?? '');
 const failure = ref('');
 const busy = ref(false);
 const done = ref(0);
+
+/*
+ | Empty string means "follow the deployment default", which is a different
+ | answer from 0 ("never remind me"). The field starts blank when this vault has
+ | no opinion of its own so that saving without touching it keeps it that way.
+ */
+const afterDays = ref(props.vault.rotation.isDefault ? '' : String(props.vault.rotation.afterDays));
+const savingSchedule = ref(false);
+const scheduleFailure = ref('');
+
+function saveSchedule(): void {
+    savingSchedule.value = true;
+    scheduleFailure.value = '';
+
+    router.patch(
+        `/vaults/${props.vault.uuid}/rekey/schedule`,
+        { after_days: afterDays.value === '' ? null : Number(afterDays.value) },
+        {
+            preserveScroll: true,
+            onError: (errors) => {
+                scheduleFailure.value = Object.values(errors)[0] ?? 'That could not be saved.';
+            },
+            onFinish: () => {
+                savingSchedule.value = false;
+            },
+        },
+    );
+}
 
 /** One check per member, recomputed whenever a pin is added. */
 const checks = computed(() =>
@@ -219,9 +249,21 @@ async function rekey(): Promise<void> {
         <h1 class="mt-4 text-base font-medium">Re-key this vault</h1>
 
         <div class="mt-4 max-w-prose space-y-3 text-sm text-muted">
-            <p>
+            <!--
+                Two reasons to be on this page, and they deserve different
+                sentences. One is a consequence of a revocation; the other is
+                somebody choosing to rotate. Telling a person who came here
+                deliberately that "someone was removed" would be describing an
+                event that did not happen.
+            -->
+            <p v-if="required">
                 Someone was removed from this vault. Rotating the key means everything written from now on is
                 encrypted under a key they do not have.
+            </p>
+            <p v-else>
+                Rotating replaces this vault's key. Everything written from now on is encrypted under the new
+                one, and anyone holding a copy of the old key — a lost laptop, a browser you no longer trust —
+                stops being able to read what comes next.
             </p>
             <!--
                 The limit, stated where the action is taken rather than buried
@@ -331,5 +373,67 @@ async function rekey(): Promise<void> {
             {{ unverified.length === 1 ? 'member still needs' : 'members still need' }} checking before this
             can run.
         </p>
+
+        <!--
+            The other maintenance operation on this vault's cryptography, linked
+            from here so the two live together — and separated in words, because
+            they are easy to confuse and fix different things. A re-key changes
+            which key opens the vault; a re-seal changes the envelope around
+            payloads that key already opens.
+        -->
+        <section class="panel mt-10 p-4">
+            <h2 class="text-2xs tracking-[0.08em] text-faint uppercase">envelope versions</h2>
+
+            <p class="mt-2 max-w-prose text-2xs text-muted">
+                Rotating re-wraps every key in this vault, which brings the wrapped keys onto the current
+                envelope version as a side effect. It does not touch the payloads — those are re-sealed only
+                when something writes them, so anything nobody has edited stays where it is.
+            </p>
+
+            <Link :href="`/vaults/${vault.uuid}/reseal`" class="btn mt-4 inline-block">
+                re-seal this vault's payloads
+            </Link>
+        </section>
+
+        <!--
+            A reminder, and the page is careful to say that is all it is. There
+            is no job behind this number and there cannot be: rotating needs a
+            browser holding the current Vault Key, which no server ever does.
+        -->
+        <section class="panel mt-10 p-4">
+            <h2 class="text-2xs tracking-[0.08em] text-faint uppercase">remind me to rotate</h2>
+
+            <p class="mt-2 max-w-prose text-2xs text-muted">
+                This key was last changed
+                <template v-if="vault.rotation.rotatedAt">
+                    on {{ new Date(vault.rotation.rotatedAt).toLocaleDateString() }}</template
+                ><template v-else> at some point before this was recorded</template>. Nothing rotates on a
+                timer — the server cannot, since only a member can unwrap the current key — so this only
+                decides when the vault page starts saying the key is old.
+            </p>
+
+            <p class="mt-2 max-w-prose text-2xs text-faint">
+                Worth knowing what an interval buys: rotation leaves every payload ciphertext untouched, so it
+                does not re-protect anything already written. It bounds how long a key that escaped keeps
+                opening what comes next. Useful when you think one did; close to ritual otherwise.
+            </p>
+
+            <form class="mt-4 flex items-end gap-3" @submit.prevent="saveSchedule">
+                <label class="text-2xs text-muted">
+                    <span class="block">every … days (0 for never, blank for the default)</span>
+                    <input
+                        v-model="afterDays"
+                        type="number"
+                        min="0"
+                        max="3650"
+                        class="field mt-1 w-40"
+                        :placeholder="String(vault.rotation.afterDays)"
+                    />
+                </label>
+                <button type="submit" class="btn" :disabled="savingSchedule">save</button>
+            </form>
+
+            <p v-if="scheduleFailure" class="mt-3 text-2xs text-accent">{{ scheduleFailure }}</p>
+        </section>
     </AppLayout>
 </template>

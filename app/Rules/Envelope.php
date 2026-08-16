@@ -21,8 +21,24 @@ use Illuminate\Translation\PotentiallyTranslatedString;
  */
 class Envelope implements ValidationRule
 {
-    /** Matches ENVELOPE_VERSION / ALG_XCHACHA20_POLY1305 in resources/js/crypto/envelope.ts. */
-    public const SUPPORTED_VERSIONS = [1];
+    /**
+     * Matches SUPPORTED_ENVELOPE_VERSIONS in resources/js/crypto/envelope.ts.
+     *
+     * Both are accepted and only 2 is written. Version 2 authenticates its own
+     * header by putting `ver` and `alg` inside the associated data; version 1
+     * did not, and rows sealed before Phase 10 exist. There is no migration that
+     * could rewrite them — the server cannot decrypt — so they are re-sealed at
+     * version 2 the next time a client writes them.
+     *
+     * **Removing 1 from this list is a data loss event, not a cleanup.** It would
+     * refuse every write of a row that still holds a version 1 envelope,
+     * including the write that would have upgraded it. Check the counts in
+     * `vault:health` first, and expect them to reach zero only for rows somebody
+     * actually edits.
+     */
+    public const SUPPORTED_VERSIONS = [1, 2];
+
+    public const CURRENT_VERSION = 2;
 
     public const SUPPORTED_ALGORITHMS = [1];
 

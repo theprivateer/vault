@@ -39,13 +39,15 @@ class UserIdentityController extends Controller
             ->where('handle', $handle)
             ->first();
 
-        abort_if($user?->identity === null, 404);
+        $bundle = $user?->publicIdentityBundle();
+
+        abort_if($user === null || $bundle === null, 404);
 
         return response()->json([
             'uuid' => $user->uuid,
             'displayName' => $user->display_name,
             'handle' => $user->handle,
-            ...$user->identity->toPublicBundle(),
+            ...$bundle,
         ]);
     }
 }

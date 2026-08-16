@@ -49,3 +49,14 @@ Schedule::command('vault:history-prune')->dailyAt('03:45')->withoutOverlapping()
  | exists" should be short.
  */
 Schedule::command('vault:links-prune')->hourly()->withoutOverlapping();
+
+/*
+ | Structural faults in vault key state (Phase 10): memberships stranded on an
+ | old epoch, vaults told to re-key that never did, wrapped keys that are not
+ | readable envelopes.
+ |
+ | Weekly rather than nightly. Every fault it can find is a slow one — none of
+ | them appears and resolves inside a day — and a job that fails loudly is only
+ | useful while a failure still means something.
+ */
+Schedule::command('vault:verify-keys')->weeklyOn(1, '05:30')->withoutOverlapping();

@@ -23,9 +23,30 @@
 import type { Grant, GrantClaims, GrantRole, GrantVerdict } from '@/crypto/grant';
 import { fingerprintHex, verifyGrant } from '@/crypto/grant';
 import { computeFingerprint, verifyPublicKeys } from '@/crypto/identity';
+import { verifyRotation } from '@/crypto/rotation';
 
 import { fromBase64 } from './bytes';
 import { checkPin, type PinMap } from './pins';
+
+/**
+ * The identity this one replaced, and the notice that replaced it.
+ *
+ * Served alongside the current keys so a peer whose pin no longer matches can
+ * tell a rotation from a substitution. The retired *public keys* travel with it
+ * because a pin is a fingerprint, and a fingerprint cannot verify a signature —
+ * the peer recomputes the fingerprint from these two keys, checks it against
+ * their own pin, and only then does the signature mean anything.
+ */
+export interface RotationNotice {
+    x25519PublicKey: string;
+    ed25519PublicKey: string;
+    selfSignature: string;
+    fingerprint: string;
+    /** The canonical statement, byte-exact as it was signed. */
+    payload: string;
+    signature: string;
+    rotatedAt: string;
+}
 
 /** A public key bundle as `/users/{handle}/identity` returns it. */
 export interface PublicIdentity {
@@ -37,6 +58,8 @@ export interface PublicIdentity {
     selfSignature: string;
     /** The server's cached copy. Recomputed here and otherwise ignored. */
     fingerprint: string;
+    /** Null until this account has rotated. One link back, never a chain. */
+    rotation?: RotationNotice | null;
 }
 
 export type IdentityStatus =
@@ -57,6 +80,19 @@ export interface IdentityCheck {
     pinned: string;
     /** Why, in words the interface can show without rewriting. */
     detail: string;
+    /**
+     * Whether the keys you pinned signed a notice introducing these ones.
+     *
+     * Only meaningful when the status is `changed`, and **it is not an accept**.
+     * A stolen key signs a valid notice, which is the case rotation most often
+     * exists for — so this narrows "someone substituted a key" to "either they
+     * rotated, or whoever took their old key did". The interface still refuses
+     * to continue without an out-of-band check, and says which of the two
+     * situations it is looking at rather than showing one screen for both.
+     */
+    certified: boolean;
+    /** When the notice says the change happened, ISO 8601. Empty otherwise. */
+    rotatedAt: string;
 }
 
 export function checkIdentity(identity: PublicIdentity, pins: PinMap): IdentityCheck {
@@ -94,19 +130,18 @@ export function checkIdentity(identity: PublicIdentity, pins: PinMap): IdentityC
     const verdict = checkPin(pins, identity.uuid, fingerprint);
 
     if (verdict.status === 'match') {
-        return { status: 'verified', fingerprint, pinned: fingerprint, detail: 'Verified previously.' };
+        return {
+            status: 'verified',
+            fingerprint,
+            pinned: fingerprint,
+            detail: 'Verified previously.',
+            certified: false,
+            rotatedAt: '',
+        };
     }
 
     if (verdict.status === 'changed') {
-        return {
-            status: 'changed',
-            fingerprint,
-            pinned: verdict.pinned,
-            detail:
-                'These are not the keys you verified for this person before. That happens when ' +
-                'someone reinstalls or rotates their keys — and it is also exactly what a server ' +
-                'substituting its own key looks like. The two are indistinguishable from here.',
-        };
+        return changed(identity, fingerprint, verdict.pinned);
     }
 
     return {
@@ -114,6 +149,84 @@ export function checkIdentity(identity: PublicIdentity, pins: PinMap): IdentityC
         fingerprint,
         pinned: '',
         detail: 'You have not verified these keys before.',
+        certified: false,
+        rotatedAt: '',
+    };
+}
+
+/**
+ * A changed pin, and whether the keys you pinned vouched for the new ones.
+ *
+ * The status is `changed` either way — nothing here can produce an accept, and
+ * every caller still refuses to continue. What a certified notice changes is
+ * what the person is told, and that matters: shown the same red screen for a
+ * colleague's routine rotation and for an active attack, people learn to click
+ * through it. Distinguishing them is what keeps the stop meaningful.
+ */
+function changed(identity: PublicIdentity, fingerprint: string, pinned: string): IdentityCheck {
+    const uncertified: IdentityCheck = {
+        status: 'changed',
+        fingerprint,
+        pinned,
+        detail:
+            'These are not the keys you verified for this person before. That happens when ' +
+            'someone reinstalls or rotates their keys — and it is also exactly what a server ' +
+            'substituting its own key looks like. The two are indistinguishable from here.',
+        certified: false,
+        rotatedAt: '',
+    };
+
+    const notice = identity.rotation;
+
+    if (!notice) {
+        return uncertified;
+    }
+
+    let retiredEd25519: Uint8Array;
+    let retiredX25519: Uint8Array;
+    let signature: Uint8Array;
+
+    try {
+        retiredEd25519 = fromBase64(notice.ed25519PublicKey);
+        retiredX25519 = fromBase64(notice.x25519PublicKey);
+        signature = fromBase64(notice.signature);
+    } catch {
+        return uncertified;
+    }
+
+    /*
+     | The retired keys are supplied by the server, so the first thing to
+     | establish is that they are the keys *this browser* pinned. Verifying the
+     | notice against a key the server chose would be asking the forger whether
+     | the forgery is genuine — the pin is the only thing here that did not come
+     | from the server.
+     */
+    const retiredFingerprint = fingerprintHex(computeFingerprint(retiredEd25519, retiredX25519));
+
+    if (retiredFingerprint !== pinned) {
+        return uncertified;
+    }
+
+    const verdict = verifyRotation(signature, notice.payload, retiredEd25519, {
+        userUuid: identity.uuid,
+        previousFingerprint: pinned,
+        fingerprint,
+    });
+
+    if (!verdict.certified) {
+        return uncertified;
+    }
+
+    return {
+        status: 'changed',
+        fingerprint,
+        pinned,
+        detail:
+            'The keys you verified before signed a notice introducing these ones. That is what a ' +
+            'genuine rotation looks like — and it is also what it looks like when somebody who took ' +
+            'their old key rotates to one of their own. Check the new fingerprint with them.',
+        certified: true,
+        rotatedAt: verdict.statement.rotatedAt,
     };
 }
 
@@ -147,6 +260,21 @@ export function checkMembership(
     ownFingerprint: string,
     vaultUuid: string,
     pins: PinMap,
+    /**
+     * Fingerprints this account used to have, from `auth.previousFingerprints`.
+     *
+     * A grant names the keys it was issued for, so after rotating your own
+     * identity every grant anybody made you names a fingerprint you no longer
+     * hold — and every shared vault would render as unverifiable because of a
+     * change you made yourself. Accepting a grant issued to a former identity of
+     * yours is correct: it is still a true statement by the granter about you.
+     *
+     * Safe to take from the server, precisely because it can only let a check
+     * succeed and never forge one. Verifying still needs the granter's signature
+     * over a grant naming both that fingerprint and your account, and that is the
+     * thing a server cannot produce.
+     */
+    previousFingerprints: readonly string[] = [],
 ): MembershipTrust {
     if (
         membership.grantSignature === null ||
@@ -176,20 +304,6 @@ export function checkMembership(
         };
     }
 
-    const expected: GrantClaims = {
-        vaultUuid,
-        recipientUuid: membership.member.uuid,
-        /*
-         | The recipient's *own* fingerprint, recomputed from the keys in their
-         | own browser rather than taken from the row. This is what stops a
-         | server replaying a genuine grant against a public key it substituted:
-         | the grant names the keys it was issued for, and those are not these.
-         */
-        recipientFingerprint: ownFingerprint,
-        role: membership.role,
-        keyEpoch: membership.keyEpoch,
-    };
-
     let signature: Uint8Array;
 
     try {
@@ -198,18 +312,56 @@ export function checkMembership(
         return { trusted: false, reason: 'grant', detail: 'The signature on this grant is not readable.' };
     }
 
-    const verdict: GrantVerdict = verifyGrant(
-        signature,
-        membership.grantPayload,
-        fromBase64(membership.grantedBy.ed25519PublicKey),
-        expected,
-    );
+    const granterKey = fromBase64(membership.grantedBy.ed25519PublicKey);
 
-    if (!verdict.valid) {
-        return { trusted: false, reason: 'grant', detail: verdict.detail };
+    /*
+     | Current identity first, then any this account has retired. Ordered that
+     | way because the common case is the first entry and because a failure
+     | should be reported against the keys the user actually holds — telling
+     | somebody their grant does not match a fingerprint they stopped using in
+     | March would name the least useful of the mismatches.
+     */
+    let firstFailure: GrantVerdict | null = null;
+
+    for (const recipientFingerprint of [ownFingerprint, ...previousFingerprints]) {
+        const expected: GrantClaims = {
+            vaultUuid,
+            recipientUuid: membership.member.uuid,
+            /*
+             | The recipient's *own* fingerprint, recomputed from the keys in
+             | their own browser rather than taken from the row. This is what
+             | stops a server replaying a genuine grant against a public key it
+             | substituted: the grant names the keys it was issued for, and those
+             | are not these.
+             */
+            recipientFingerprint,
+            role: membership.role,
+            keyEpoch: membership.keyEpoch,
+        };
+
+        const verdict: GrantVerdict = verifyGrant(signature, membership.grantPayload, granterKey, expected);
+
+        if (verdict.valid) {
+            return { trusted: true, grant: verdict.grant };
+        }
+
+        firstFailure ??= verdict;
+
+        /*
+         | Only a fingerprint mismatch is worth retrying. A bad signature or a
+         | wrong role fails identically against every identity this account has
+         | ever had, and looping would turn one clear answer into N of the same.
+         */
+        if (verdict.reason !== 'mismatch') {
+            break;
+        }
     }
 
-    return { trusted: true, grant: verdict.grant };
+    return {
+        trusted: false,
+        reason: 'grant',
+        detail: firstFailure?.valid === false ? firstFailure.detail : 'This grant could not be checked.',
+    };
 }
 
 function matchesServedFingerprint(served: string, computed: string): boolean {
@@ -221,5 +373,5 @@ function matchesServedFingerprint(served: string, computed: string): boolean {
 }
 
 function invalid(detail: string): IdentityCheck {
-    return { status: 'invalid', fingerprint: '', pinned: '', detail };
+    return { status: 'invalid', fingerprint: '', pinned: '', detail, certified: false, rotatedAt: '' };
 }

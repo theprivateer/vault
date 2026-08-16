@@ -88,6 +88,76 @@ class User extends Authenticatable
     }
 
     /**
+     * Identities this user has retired, newest last.
+     *
+     * Public halves only, plus the certificate that retired each one. See
+     * `UserIdentityArchive` — the private keys are what a rotation exists to
+     * discard.
+     *
+     * @return HasMany<UserIdentityArchive, $this>
+     */
+    public function identityArchive(): HasMany
+    {
+        return $this->hasMany(UserIdentityArchive::class);
+    }
+
+    /**
+     * The most recently retired identity, or null if this user has never
+     * rotated. Exactly one link back, deliberately: see docs/03 § Identity key
+     * rotation on why a longer chain is not offered.
+     */
+    public function previousIdentity(): ?UserIdentityArchive
+    {
+        return $this->identityArchive()->orderByDesc('rotated_at')->orderByDesc('id')->first();
+    }
+
+    /**
+     * Fingerprints this account has retired, oldest first, lowercase hex.
+     *
+     * Hex rather than base64 because that is the form a grant records, and a
+     * caller that had to convert would be a caller that could convert wrongly.
+     *
+     * @return list<string>
+     */
+    public function previousFingerprints(): array
+    {
+        return array_values($this->identityArchive()
+            ->orderBy('rotated_at')
+            ->orderBy('id')
+            ->get()
+            ->map(fn (UserIdentityArchive $archive): string => bin2hex($archive->fingerprint->bytes()))
+            ->all());
+    }
+
+    /**
+     * This account's public keys as another user needs to see them.
+     *
+     * One method rather than `identity->toPublicBundle()` at three call sites,
+     * because the rotation certificate has to travel with the keys everywhere
+     * they go. A peer shown a changed fingerprint without it cannot tell a
+     * rotation from a substitution — and if only some screens carried it, the
+     * ones that did not would show a hard stop for a change the others explained.
+     *
+     * Null when the account has published nothing, which is a state the sharing
+     * flow already handles: such an account cannot be shared with at all.
+     *
+     * @return array{x25519PublicKey: string, ed25519PublicKey: string, selfSignature: string, fingerprint: string, rotation: ?array{x25519PublicKey: string, ed25519PublicKey: string, selfSignature: string, fingerprint: string, payload: string, signature: string, rotatedAt: string}}|null
+     */
+    public function publicIdentityBundle(): ?array
+    {
+        $identity = $this->identity;
+
+        if ($identity === null) {
+            return null;
+        }
+
+        return [
+            ...$identity->toPublicBundle(),
+            'rotation' => $this->previousIdentity()?->toClientArray(),
+        ];
+    }
+
+    /**
      * The encrypted record of whose public keys this user has verified.
      *
      * @return HasOne<UserPinStore, $this>

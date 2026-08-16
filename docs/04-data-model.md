@@ -22,6 +22,7 @@ Conventions throughout:
 users ──1:N── user_key_wraps          (password / recovery / [prf] wrappings of the User Key)
   │
   ├──1:1──── user_identities          (X25519 + Ed25519 public keys, encrypted private keys)
+  ├──1:N──── user_identity_archive    (retired public keys + the notices that retired them)
   ├──1:1──── user_pin_stores          (encrypted TOFU fingerprint cache)
   ├──1:N──── totp_backup_codes        (hashed, single-use — the second factor's escape hatch)
   │
@@ -109,6 +110,38 @@ two keys were published together, and the client-side pin store plus fingerprint
 (D8) is what actually detects substitution. The database is not the root of trust here — the
 user's out-of-band comparison is.
 
+The row is **replaced** by a rotation rather than added to, and the outgoing one moves to
+`user_identity_archive`. `rotated_at` is when this pair took over.
+
+### `user_identity_archive`
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `user_id` | FK cascade | |
+| `x25519_public_key` | binary(32) | the retired key, plaintext |
+| `ed25519_public_key` | binary(32) | the retired key, plaintext |
+| `self_signature` | binary(64) | as published at the time |
+| `fingerprint` | binary(32) | what peers had pinned |
+| `rotation_payload` | text | the exact canonical bytes the retired key signed — **never cast, never re-encoded** |
+| `rotation_signature` | binary(64) | Ed25519 by the **retired** key over its successor |
+| `rotated_at` | timestamp | |
+
+**Public halves only, and that is the point of the table's existence rather than an omission.** The
+private keys are discarded when a rotation lands; keeping a copy would make the operation a rename.
+
+Two jobs, and they are different. The certificate lets a peer holding the old fingerprint tell "they
+rotated" from "the server substituted a key" — those otherwise arrive as the same hard stop, and a
+person shown the same red screen for both learns to click through it. The retired fingerprint lets
+the *owner's* own client still verify grants issued to them before the rotation: a grant names the
+fingerprint it was issued for, so without this every shared vault would render as unverifiable over a
+change the user made themselves.
+
+`rotation_payload` is `text` for the same reason `vault_memberships.grant_payload` is text-preserving:
+a signature verifies over bytes, and a round trip through a JSON codec is free to change them.
+
+**Leaks:** that an account rotated, and when. Accepted — the fact is inherent in serving a different
+public key, and the timing is what makes the certificate useful.
+
 ### `user_pin_stores`
 
 | Column | Type | Notes |
@@ -140,13 +173,23 @@ verified.
 | `payload_version` | smallint | bound into AAD |
 | `key_epoch` | int default 1 | increments on rotation |
 | `rekey_required_at` | timestamp null | set on revocation; drives the owner's re-key prompt |
+| `key_rotated_at` | timestamp null | when the Vault Key last changed; set at creation and on every re-key |
+| `rotate_after_days` | smallint null | reminder interval; null follows `config/vault.php`, zero never reminds |
 | `history_max_versions` | smallint null | retention; null follows `config/vault.php`, zero keeps none |
 | `history_max_age_days` | smallint null | retention; null follows `config/vault.php` |
 | `timestamps`, `deleted_at` | | soft deletes |
 
-**Leaks:** existence, ownership, timestamps, how many vaults a user has, and how much history it
-keeps. **The name is encrypted** — the single biggest change from 2017, where `vaults.name` was
-plaintext.
+**Leaks:** existence, ownership, timestamps, how many vaults a user has, how much history it keeps,
+and how old its key is. **The name is encrypted** — the single biggest change from 2017, where
+`vaults.name` was plaintext.
+
+`key_epoch` says how many times a vault has rotated and `updated_at` moves for a rename, so neither
+answers "has this key been the same since 2026". `key_rotated_at` is the column that means only that.
+`rotate_after_days` is a **reminder, not a schedule**: nothing on this server can rotate a Vault Key,
+because unwrapping the current one needs a member's browser, so the number only decides when the
+interface starts saying the key is old. It defaults to zero — a rotation leaves every payload
+ciphertext untouched, so a calendar interval bounds how long a leaked Vault Key keeps opening things
+written *after* the leak and nothing else.
 
 The two retention columns are the only settings in the application the server can read, and they
 have to be: the server is the thing that enforces them, and a retention policy only the client
@@ -499,6 +542,11 @@ working credential somewhere it does not need to be. See
 - Secret delete → soft delete; its versions stay, because a restorable secret with no history
   would come back missing most of what it was. A hard delete cascades them.
 - Membership revoke → sets `revoked_at` and `vaults.rekey_required_at` in one transaction.
+- Identity rotation → the `user_identities` row is overwritten and its public halves move to
+  `user_identity_archive`, in the same transaction that re-seals every live membership's
+  `wrapped_vault_key`. **All of it or none of it**: the old private key is discarded, so a membership
+  left out would be a sealed Vault Key nothing could ever open again. Revoked memberships are
+  excluded — carrying them across would re-seal access that was deliberately withdrawn.
 
 ## Indexes
 

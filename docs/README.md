@@ -97,4 +97,16 @@ opaque to the server; search happens in the browser.
   cannot reverse — and because the token is in the fragment too, a chat client's link preview cannot
   spend the single view.
 
-Next: [Phase 10 — key lifecycle at scale](05-implementation-plan.md#phase-10--key-lifecycle-at-scale).
+- **Phase 10** — key management as a routine operation rather than an emergency one: vault keys
+  rotated on demand, Argon2id parameters re-run silently at the one moment a browser holds the
+  password, and an envelope version bump that finally exercises the agility designed in Phase 1.
+  The interesting one is identity rotation, which needs nobody's cooperation — you still hold your
+  old private key, so your own browser opens every Vault Key sealed to it and re-seals each to a
+  fresh pair. It is all-or-nothing for the same reason a vault re-key is: the old key is discarded,
+  and anything left behind could never be opened again. Peers are told by a notice signed with the
+  key being retired, which distinguishes a rotation from a substitution without ever excusing one —
+  a stolen key signs an equally valid notice. Moving existing rows onto the new envelope is an
+  operation a person runs rather than a migration a job performs, because nothing on the server can
+  re-seal what it cannot read.
+
+Next: [Phase 11 — hardening and verification](05-implementation-plan.md#phase-11--hardening--verification).

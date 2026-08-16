@@ -27,10 +27,45 @@ enum AuditAction: string
     case TotpEnabled = 'auth.totp_enabled';
     case TotpDisabled = 'auth.totp_disabled';
 
+    /**
+     * Password stretching re-run at raised parameters (Phase 10).
+     *
+     * Invisible to the user by design — it happens on the next login with no
+     * prompt — which is exactly why it is logged. It rewrites the stored
+     * authentication material, and without an entry there would be no way for
+     * somebody reading the log afterwards to tell a silent upgrade from a
+     * password change they did not make.
+     */
+    case KdfUpgraded = 'auth.kdf_upgraded';
+
+    /**
+     * A user replaced their X25519/Ed25519 pair (Phase 10).
+     *
+     * Recorded against the user rather than any vault, because it is one act
+     * that touches every vault they belong to: their sealed Vault Key on each
+     * membership row is re-sealed to the new public key in the same request.
+     * `count` says how many, which is what makes an incomplete rotation visible
+     * afterwards — the server refuses one, and the log is read by somebody who
+     * was not here when it did.
+     */
+    case IdentityRotated = 'auth.identity_rotated';
+
     case VaultCreated = 'vault.created';
     case VaultUpdated = 'vault.updated';
     case VaultDeleted = 'vault.deleted';
     case VaultRekeyed = 'vault.rekeyed';
+
+    /**
+     * Payloads re-sealed at the current envelope version (Phase 10).
+     *
+     * Its own action rather than a run of `vault.updated`, because nothing
+     * changed. The plaintext is identical; only the envelope around it moved.
+     * Recording this as an edit — or as N edits — would put "somebody changed
+     * every secret in this vault on a Tuesday" into a log that cannot be
+     * corrected, which is exactly the sort of false history the chain exists to
+     * make impossible.
+     */
+    case VaultResealed = 'vault.resealed';
 
     /**
      * Ownership transfer (Phase 5, task 9).
@@ -142,11 +177,14 @@ enum AuditAction: string
             self::RecoveryKitIssued => 'issued a new recovery kit',
             self::TotpEnabled => 'turned on two-factor authentication',
             self::TotpDisabled => 'turned off two-factor authentication',
+            self::KdfUpgraded => 'had their password stretching upgraded',
+            self::IdentityRotated => 'replaced their identity keys',
             self::VaultCreated => 'created this vault',
             self::VaultUpdated => 'renamed this vault',
             self::VaultDeleted => 'deleted this vault',
             self::VaultRekeyed => 'rotated this vault’s key',
             self::VaultOwnershipTransferred => 'handed this vault over, and became an editor of it',
+            self::VaultResealed => 're-sealed this vault’s payloads at the current envelope version',
             self::VaultUnlocked => 'unlocked this vault',
             self::LockboxCreated => 'created a lockbox',
             self::LockboxUpdated => 'renamed a lockbox',

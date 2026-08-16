@@ -91,11 +91,12 @@ class VaultMembership extends Model
      * included, because it would be worthless — the server serves the public key
      * too, so it could only ever be checking its own work.
      *
-     * @return array{uuid: string, role: string, keyEpoch: int, acceptedAt: ?string, grantSignature: ?string, grantPayload: ?string, grantedBy: ?array{uuid: string, displayName: string, handle: string, ed25519PublicKey: string, x25519PublicKey: string, selfSignature: string, fingerprint: string}, member: array{uuid: string, displayName: string, handle: string}}
+     * @return array{uuid: string, role: string, keyEpoch: int, acceptedAt: ?string, grantSignature: ?string, grantPayload: ?string, grantedBy: ?array<string, mixed>, member: array{uuid: string, displayName: string, handle: string}}
      */
     public function toClientArray(): array
     {
         $granter = $this->granter;
+        $granterIdentity = $granter?->publicIdentityBundle();
 
         return [
             'uuid' => $this->uuid,
@@ -104,11 +105,11 @@ class VaultMembership extends Model
             'acceptedAt' => $this->accepted_at?->toIso8601String(),
             'grantSignature' => $this->grant_signature?->base64,
             'grantPayload' => $this->grant_payload,
-            'grantedBy' => $granter?->identity === null ? null : [
+            'grantedBy' => $granter === null || $granterIdentity === null ? null : [
                 'uuid' => $granter->uuid,
                 'displayName' => $granter->display_name,
                 'handle' => $granter->handle,
-                ...$granter->identity->toPublicBundle(),
+                ...$granterIdentity,
             ],
             'member' => [
                 'uuid' => $this->user->uuid,

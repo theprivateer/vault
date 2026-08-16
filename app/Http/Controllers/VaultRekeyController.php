@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Enums\AuditAction;
 use App\Http\Requests\RekeyVaultRequest;
+use App\Http\Requests\UpdateRotationRequest;
 use App\Models\Lockbox;
 use App\Models\Secret;
 use App\Models\SecretVersion;
@@ -60,6 +61,15 @@ class VaultRekeyController extends Controller
 
         return Inertia::render('vaults/Rekey', [
             'vault' => $vault->toClientArray($this->membershipFor($vault, $request)),
+
+            /*
+             | Whether a revocation demanded this rotation, or somebody chose it
+             | (Phase 10). The mechanics are identical and the sentence at the
+             | top of the page is not: telling a person who came here
+             | deliberately that "someone was removed" describes an event that
+             | did not happen.
+             */
+            'required' => $vault->rekey_required_at !== null,
             'items' => $this->itemKeys($vault)
                 ->map(fn (ItemKey $item): array => [
                     'uuid' => $item->uuid,
@@ -71,7 +81,7 @@ class VaultRekeyController extends Controller
                     ...$membership->toClientArray(),
                     // The public key the new Vault Key gets sealed to, and the
                     // fingerprint the owner must confirm before it does.
-                    'identity' => $membership->user->identity?->toPublicBundle(),
+                    'identity' => $membership->user->publicIdentityBundle(),
                 ])
                 ->values(),
         ]);
@@ -132,6 +142,7 @@ class VaultRekeyController extends Controller
                 )->base64,
                 'key_epoch' => $request->integer('key_epoch'),
                 'rekey_required_at' => null,
+                'key_rotated_at' => now(),
             ])->save();
 
             /*
@@ -148,6 +159,31 @@ class VaultRekeyController extends Controller
         });
 
         return to_route('vaults.show', $vault);
+    }
+
+    /**
+     * How often this vault asks to be reminded that its key is old.
+     *
+     * Lives here rather than beside the retention settings because it is about
+     * rotation, and everything about rotation should be one place — but note
+     * that it is a different *kind* of thing from `store()` above. That one
+     * needs a browser holding the Vault Key. This one writes an integer, and
+     * the server could not act on it if it wanted to: nothing here can rotate a
+     * key it has never held.
+     */
+    public function schedule(UpdateRotationRequest $request, Vault $vault): RedirectResponse
+    {
+        $value = $request->input('after_days');
+
+        $vault->forceFill([
+            // Null and 0 are both falsy and mean opposite things — defer to the
+            // deployment default, or never remind me — so the empty cases are
+            // named rather than coalesced. An empty string is what a cleared
+            // number input posts.
+            'rotate_after_days' => $value === null || $value === '' ? null : $request->integer('after_days'),
+        ])->save();
+
+        return back();
     }
 
     /**

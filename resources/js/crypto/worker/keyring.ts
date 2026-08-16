@@ -11,21 +11,24 @@ import { openChunk, sealChunk } from '../chunks';
 import { open, seal } from '../envelope';
 import { InvalidParameterError, KeyUnavailableError, MalformedEnvelopeError } from '../errors';
 import type { Grant, SignedGrant } from '../grant';
-import { signGrant } from '../grant';
-import { generateIdentity } from '../identity';
+import { fingerprintHex, signGrant } from '../grant';
+import { signRotation } from '../rotation';
+import { computeFingerprint, generateIdentity } from '../identity';
 import {
     deriveFromPassword,
     deriveRecoveryKeys,
+    ed25519PublicKeyOf,
     generateKey,
     generateRecoveryCode,
     openSealed,
     sealTo,
     unwrapKey,
     wrapKey,
+    x25519PublicKeyOf,
 } from '../keys';
 import type { KdfParams } from '../primitives';
 import { KEY_LENGTH, zeroise } from '../primitives';
-import type { BulkOpenItem, ChunkRequest, KeyHandle } from './protocol';
+import type { BulkOpenItem, ChunkRequest, KeyHandle, RotationResult, SealedMembership } from './protocol';
 import { ED25519_KEY, USER_KEY, X25519_KEY } from './protocol';
 
 /**
@@ -71,6 +74,14 @@ export interface RegistrationResult {
     ed25519PrivateKeyCt: Uint8Array;
     selfSignature: Uint8Array;
     fingerprint: Uint8Array;
+}
+
+export interface RotationRequest {
+    /** The account's UUID: the AAD subject for the private key ciphertexts. */
+    uuid: string;
+    /** ISO 8601, UTC, second precision, inside the signed certificate. */
+    rotatedAt: string;
+    memberships: SealedMembership[];
 }
 
 export interface SealChunkRequest extends ChunkRequest {
@@ -215,6 +226,81 @@ export class Keyring {
             return { authKey, wrappedUserKey: wrapKey(kek, userKey, aad) };
         } finally {
             zeroise(kek);
+        }
+    }
+
+    /**
+     * Replaces the identity keys, and moves every sealed Vault Key across.
+     *
+     * **Self-service, and that is the interesting part.** The user still holds
+     * their *old* X25519 private key, so their own browser can open every Vault
+     * Key sealed to it and re-seal each one to the new public key. No vault
+     * owner is involved, no Vault Key changes, and nothing is re-encrypted.
+     *
+     * **All of it, or none of it.** Every live membership must be in
+     * `memberships`, because the old private key is discarded the moment this
+     * lands: a membership left behind is a sealed key nobody can ever open
+     * again. The server enforces the set is complete, which is the same defence
+     * the vault re-key uses and for the same reason — the failure is silent and
+     * permanent.
+     *
+     * The certificate is signed by the key being **retired**. A certificate
+     * signed by the new key would attest only that the new key exists.
+     *
+     * The keyring is left untouched. See the note on the `rotateIdentity`
+     * request in protocol.ts.
+     */
+    rotateIdentity({ uuid, rotatedAt, memberships }: RotationRequest): RotationResult {
+        const userKey = this.require(USER_KEY);
+        const oldX25519 = this.require(X25519_KEY);
+        const oldEd25519 = this.require(ED25519_KEY);
+
+        const identity = generateIdentity();
+
+        const aad = (context: AadContext): AadParams => ({ context, subject: uuid, version: 1 });
+
+        try {
+            const resealed = memberships.map(({ uuid: membershipUuid, sealed }) => {
+                const membershipAad: AadParams = {
+                    context: 'vault.membership.key',
+                    subject: membershipUuid,
+                    version: 1,
+                };
+
+                const vaultKey = openSealed(oldX25519, sealed, membershipAad);
+
+                try {
+                    return {
+                        uuid: membershipUuid,
+                        // The same associated data it arrived under. The row is
+                        // the same row, so a rotation must not become a way to
+                        // move a key onto a different membership.
+                        wrappedVaultKey: sealTo(identity.x25519.publicKey, vaultKey, membershipAad),
+                    };
+                } finally {
+                    zeroise(vaultKey);
+                }
+            });
+
+            return {
+                x25519PublicKey: identity.x25519.publicKey,
+                ed25519PublicKey: identity.ed25519.publicKey,
+                x25519PrivateKeyCt: seal(userKey, identity.x25519.secretKey, aad('user.privkey.x25519')),
+                ed25519PrivateKeyCt: seal(userKey, identity.ed25519.secretKey, aad('user.privkey.ed25519')),
+                selfSignature: identity.selfSignature,
+                fingerprint: identity.fingerprint,
+                certificate: signRotation(oldEd25519, {
+                    userUuid: uuid,
+                    previousFingerprint: fingerprintHex(
+                        computeFingerprint(ed25519PublicKeyOf(oldEd25519), x25519PublicKeyOf(oldX25519)),
+                    ),
+                    fingerprint: fingerprintHex(identity.fingerprint),
+                    rotatedAt,
+                }),
+                memberships: resealed,
+            };
+        } finally {
+            zeroise(identity.x25519.secretKey, identity.ed25519.secretKey);
         }
     }
 

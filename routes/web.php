@@ -2,12 +2,14 @@
 
 use App\Http\Controllers\AuditEventController;
 use App\Http\Controllers\Auth\KdfParamsController;
+use App\Http\Controllers\Auth\KdfUpgradeController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\Auth\RecoveryController;
 use App\Http\Controllers\Auth\RegisterController;
 use App\Http\Controllers\Auth\TotpController;
 use App\Http\Controllers\FileChunkController;
 use App\Http\Controllers\FileController;
+use App\Http\Controllers\IdentityRotationController;
 use App\Http\Controllers\LockboxController;
 use App\Http\Controllers\PinStoreController;
 use App\Http\Controllers\SecretController;
@@ -18,6 +20,7 @@ use App\Http\Controllers\VaultController;
 use App\Http\Controllers\VaultMembershipController;
 use App\Http\Controllers\VaultOwnershipController;
 use App\Http\Controllers\VaultRekeyController;
+use App\Http\Controllers\VaultResealController;
 use App\Http\Controllers\VaultRetentionController;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
@@ -173,11 +176,34 @@ Route::middleware('auth')->group(function (): void {
         ->middleware('can:transfer,vault')
         ->name('vaults.owner.update');
 
+    /*
+     | Moving a vault's payloads onto the current envelope version (Phase 10).
+     |
+     | A write ability rather than an administrator one, and the distinction is
+     | real: this changes no key anybody holds and no plaintext, it re-seals what
+     | is already there. Anyone who may edit a secret may re-seal it, because
+     | editing it would have done the same thing by a longer route.
+     */
+    Route::middleware('can:update,vault')->group(function (): void {
+        Route::get('/vaults/{vault}/reseal', [VaultResealController::class, 'create'])
+            ->name('vaults.reseal');
+        Route::post('/vaults/{vault}/reseal', [VaultResealController::class, 'store'])
+            ->name('vaults.reseal.store');
+    });
+
     Route::middleware('can:rekey,vault')->group(function (): void {
         Route::get('/vaults/{vault}/rekey', [VaultRekeyController::class, 'create'])
             ->name('vaults.rekey');
         Route::post('/vaults/{vault}/rekey', [VaultRekeyController::class, 'store'])
             ->name('vaults.rekey.store');
+
+        /*
+         | How often this vault asks to be reminded its key is old (Phase 10).
+         | A reminder and not a schedule: rotation needs a member's browser, so
+         | there is no job this could ever trigger.
+         */
+        Route::patch('/vaults/{vault}/rekey/schedule', [VaultRekeyController::class, 'schedule'])
+            ->name('vaults.rekey.schedule');
     });
 
     /*
@@ -305,6 +331,27 @@ Route::middleware('auth')->group(function (): void {
         ->name('files.destroy');
 
     Route::post('/account/password', [RecoveryController::class, 'update'])->name('password.update');
+
+    /*
+     | Re-stretching the same password at raised parameters (Phase 10). Silent,
+     | on the next login, because that is the only moment a browser holds the
+     | password — and it demands the current auth key anyway, since a re-wrap
+     | the server cannot inspect is otherwise indistinguishable from an attacker
+     | changing the password to one they chose.
+     */
+    Route::post('/account/kdf', KdfUpgradeController::class)->name('kdf.upgrade');
+
+    /*
+     | Replacing your own identity keys (Phase 10). Self-service, because you
+     | still hold the old private key and can therefore re-seal every Vault Key
+     | sealed to it yourself — no vault owner is involved and no Vault Key
+     | changes. All or nothing: the old key is discarded when this lands, so a
+     | membership left out could never be opened again.
+     */
+    Route::get('/account/identity', [IdentityRotationController::class, 'create'])
+        ->name('identity.rotate');
+    Route::post('/account/identity', [IdentityRotationController::class, 'store'])
+        ->name('identity.rotate.store');
     Route::post('/account/recovery-kit', [RecoveryController::class, 'reissue'])
         ->name('recovery-kit.reissue');
 

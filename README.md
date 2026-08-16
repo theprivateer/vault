@@ -77,10 +77,11 @@ Read in this order:
 
 ## Status
 
-Phases 0–9 of [thirteen](docs/05-implementation-plan.md) are complete: a working zero-knowledge
+Phases 0–10 of [thirteen](docs/05-implementation-plan.md) are complete: a working zero-knowledge
 vault that can be shared with other people and taken back, holds encrypted attachments, keeps a
-tamper-evident log of what happened in it, remembers what its secrets used to say, and can hand a
-single credential to somebody who has no account at all.
+tamper-evident log of what happened in it, remembers what its secrets used to say, can hand a single
+credential to somebody who has no account at all, and treats key rotation as a routine operation
+rather than an emergency one.
 
 - **Phase 0** — Inertia + Vue + TypeScript strict, a nonce-based CSP enforced from the first
   render, static analysis at maximum, CI gating every check.
@@ -120,8 +121,19 @@ single credential to somebody who has no account at all.
   and a hash it cannot reverse; putting the bearer token there too keeps it out of every access log
   and means a chat client's link preview cannot spend the single view.
 
-Next is [Phase 10](docs/05-implementation-plan.md#phase-10--key-lifecycle-at-scale): key lifecycle
-at scale.
+- **Phase 10** — key lifecycle: vault keys rotated on demand rather than only after a revocation,
+  identity keys replaced **without anybody else acting** — you still hold the old private key, so
+  your own browser re-seals every vault key to the new pair — and Argon2id parameters re-run silently
+  on the next login, which is the only moment a browser holds the password. A rotation is announced
+  by a notice signed with the key being retired, so a peer can tell "they rotated" from "the server
+  substituted a key"; it changes what the warning says and never whether it appears, because a stolen
+  key signs an equally valid notice. Moving old ciphertext onto a new envelope format is an operation
+  rather than a migration — the server cannot re-seal what it cannot read — so a vault owner runs it
+  from the browser, and it carries a compare-and-swap so a stale tab cannot write old plaintext back
+  under a new wrapper.
+
+Next is [Phase 11](docs/05-implementation-plan.md#phase-11--hardening--verification): hardening and
+verification.
 
 ## Stack
 

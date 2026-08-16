@@ -126,6 +126,15 @@ The server necessarily learns:
   nothing applies. Retention is also the one control here that reduces what a *future* database
   theft yields: nobody who could read the versions is stopped by deleting them, but bytes that no
   longer exist cannot be stolen next year.
+- **Key age and rotation history** — when a vault's key last changed (`vaults.key_rotated_at`), how
+  often its owner asked to be reminded, and the fact and date of every identity rotation a user has
+  performed. The rotation dates are inherent rather than conceded: serving a different public key
+  announces the change, and the signed notice beside it has to name a date to be worth anything to
+  the peer reading it. What leaks is that somebody replaced their keys on a Tuesday, never why.
+- **KDF parameters** — each account's Argon2id settings, which have to be readable before
+  authentication for the client to derive anything at all. They say how well a given password is
+  protected, which is the closest this schema comes to a "weak account" signal — mitigated by the
+  parameters being a per-deployment default that upgrades silently rather than a per-user choice.
 - **Membership** — who shares a vault with whom, with what role, and when access was granted or
   revoked. This is social-graph information and it is not hidden. Two parts of it are visible
   because they have to be: `grant_payload` is plaintext, since the recipient must read the bytes

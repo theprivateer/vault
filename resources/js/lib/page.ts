@@ -14,6 +14,14 @@ export interface SharedProps {
         identity: (IdentityBundle & { selfSignature: string }) | null;
         /** Encrypted; opened at unlock, alongside the identity it needs. */
         pins: PinStoreRecord | null;
+        /**
+         * Fingerprints this account has retired, oldest first, lowercase hex.
+         *
+         * A grant names the keys it was issued to, so without these every grant
+         * made before a rotation would fail to verify and every shared vault
+         * would render as a warning — over a change the user made themselves.
+         */
+        previousFingerprints: string[];
     };
     [key: string]: unknown;
 }

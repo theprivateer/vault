@@ -106,6 +106,21 @@ export interface VaultRecord extends EncryptedItem {
         maxAgeDays: number;
         isDefault: boolean;
     };
+    /**
+     * How old this vault's key is, and whether anybody asked to be told.
+     *
+     * `dueAt` is null when the reminder is off, which is the default — a
+     * rotation does not re-encrypt any payload, so a calendar interval bounds
+     * only how long a leaked Vault Key keeps opening things written *after* the
+     * leak. Worth having on purpose, not worth nagging about by default.
+     */
+    rotation: {
+        rotatedAt: string | null;
+        afterDays: number;
+        dueAt: string | null;
+        isDue: boolean;
+        isDefault: boolean;
+    };
     membership: {
         uuid: string;
         role: 'owner' | 'editor' | 'viewer';

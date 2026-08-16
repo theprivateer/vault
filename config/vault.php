@@ -144,6 +144,37 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Key Rotation
+    |--------------------------------------------------------------------------
+    |
+    | How old a vault's key may get before the interface starts saying so. A
+    | reminder, not a job: rotation needs a member's browser, because only a
+    | member can unwrap the current Vault Key, so nothing on this server could
+    | perform one on a timer even if it wanted to.
+    |
+    | **Zero by default, which means never remind.** Be clear about what periodic
+    | rotation of a *vault* key buys, because it is narrower than the habit
+    | suggests: payload ciphertexts are untouched by a rotation, so it does not
+    | re-protect anything already written. What it does is bound how long a
+    | leaked Vault Key keeps opening things written *after* the leak. That is
+    | worth having when you have reason to think a key escaped, and it is close
+    | to worthless as a calendar ritual — so the calendar is opt-in and the
+    | on-demand button is always there.
+    |
+    | `stale_after_days` is what `vault:health` uses to report a vault that was
+    | told to re-key and never did. That one is not a ritual: it means a removed
+    | member's cached key still opens everything written since they left.
+    |
+    */
+
+    'rotation' => [
+        'after_days' => (int) env('VAULT_ROTATE_AFTER_DAYS', 0),
+
+        'stale_after_days' => (int) env('VAULT_REKEY_STALE_DAYS', 7),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | One-Time Share Links
     |--------------------------------------------------------------------------
     |

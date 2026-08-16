@@ -7,6 +7,7 @@ use Database\Factories\UserIdentityFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Carbon;
 
 /**
  * A user's public keys, and their private keys encrypted under the User Key.
@@ -22,6 +23,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property Ciphertext $ed25519_private_key_ct
  * @property Ciphertext $self_signature
  * @property Ciphertext $fingerprint
+ * @property ?Carbon $rotated_at
  */
 class UserIdentity extends Model
 {

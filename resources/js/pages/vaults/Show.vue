@@ -41,7 +41,9 @@ const props = defineProps<{
     rekeyRequiredAt: string | null;
 }>();
 
-const page = usePage<{ auth: { user: { uuid: string } | null; identity: OwnIdentity | null } }>();
+const page = usePage<{
+    auth: { user: { uuid: string } | null; identity: OwnIdentity | null; previousFingerprints: string[] };
+}>();
 
 const { isUnlocked, crypto } = useSession();
 const { state: pins } = usePins();
@@ -108,7 +110,13 @@ const trust = computed(() => {
         return null;
     }
 
-    return checkMembership(membership, ownFingerprint.value, props.vault.uuid, pins.pins);
+    return checkMembership(
+        membership,
+        ownFingerprint.value,
+        props.vault.uuid,
+        pins.pins,
+        page.props.auth.previousFingerprints,
+    );
 });
 
 const unverifiedGrant = computed(() => (trust.value?.trusted === false ? trust.value : null));
@@ -178,6 +186,10 @@ async function create(): Promise<void> {
             },
         },
     );
+}
+
+function when(iso: string | null): string {
+    return iso === null ? 'at some point' : `on ${new Date(iso).toLocaleDateString()}`;
 }
 
 function destroy(): void {
@@ -256,6 +268,29 @@ function destroy(): void {
             </Link>
         </NoticePanel>
 
+        <!--
+            The voluntary counterpart to the panel above. Shown only when
+            somebody asked to be reminded, and phrased as an option rather than
+            a warning: a rotation does not re-protect anything already written,
+            so an old key is not by itself a problem the way an unfulfilled
+            re-key requirement is.
+        -->
+        <NoticePanel
+            v-if="!rekeyRequiredAt && isOwner && vault.rotation.isDue"
+            heading="this vault's key is due for rotation"
+            class="mt-4"
+        >
+            <p>
+                It was last changed {{ when(vault.rotation.rotatedAt) }}, and you asked to be reminded every
+                {{ vault.rotation.afterDays }} days. Rotating re-wraps every key in the vault; it does not
+                re-encrypt anything, so it bounds what an escaped key opens from here on rather than fixing
+                the past.
+            </p>
+            <Link :href="`/vaults/${props.vault.uuid}/rekey`" class="btn mt-4 inline-block">
+                re-key this vault
+            </Link>
+        </NoticePanel>
+
         <NoticePanel v-if="failure" tone="accent" heading="this vault could not be opened" class="mt-4">
             {{ failure }}
         </NoticePanel>
@@ -277,6 +312,19 @@ function destroy(): void {
                 <button v-if="canWrite" type="button" class="btn" @click="creating = !creating">
                     {{ creating ? 'cancel' : 'new lockbox' }}
                 </button>
+                <!--
+                    Rotation on demand, not only after a revocation. The whole
+                    point of Phase 10 is that key management is a routine
+                    operation rather than an emergency one, and an operation you
+                    can only reach by first removing somebody is not routine.
+                -->
+                <Link
+                    v-if="isOwner"
+                    :href="`/vaults/${props.vault.uuid}/rekey`"
+                    class="text-2xs text-muted hover:text-ink"
+                >
+                    re-key
+                </Link>
                 <!--
                     Absent rather than disabled when other people hold a key.
                     A greyed-out control invites hunting for the state that

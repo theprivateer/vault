@@ -120,6 +120,11 @@ class VaultController extends Controller
                 // membership below can be written in the same transaction
                 // without reading the row back.
                 'key_epoch' => Vault::INITIAL_KEY_EPOCH,
+
+                // The key is as old as the vault until something rotates it.
+                // Left null, a brand-new vault and one nobody has touched since
+                // 2026 would read the same way.
+                'key_rotated_at' => now(),
             ]);
 
             $vault->memberships()->create([

@@ -6,6 +6,8 @@ paths:
   - app/Http/Controllers/ShareLinkController.php
   - app/Http/Controllers/VaultOwnershipController.php
   - app/Http/Controllers/VaultController.php
+  - app/Http/Controllers/IdentityRotationController.php
+  - app/Http/Controllers/VaultResealController.php
 ---
 
 # Controllers
@@ -66,3 +68,19 @@ Vault + membership writes happen in one transaction with the vault row `lockForU
 Revoked rows are deliberately not counted — their access was already cut and the re-key that revocation demanded means their cached key opens nothing written since. Counting them would leave any vault that had ever been shared permanently undeletable.
 
 A validation error rather than a 403, and this is a considered departure from the 404-not-403 rule in .ai/rules/policies.md: that rule stops strangers probing UUIDs, whereas here the caller is an authorised administrator being told about state. The policy still answers 404 to anyone who is not an administrator.
+
+## Identity rotation is all-or-nothing, and the old private key is gone
+The submission must cover every live membership of the caller — nothing missing, nothing extra. The old X25519 private key is discarded when this lands, so a membership left out is a sealed Vault Key with no surviving key to open it: that vault is permanently unreadable for that user, silently, with the request having reported success. Same failure mode as a partial vault re-key, same refusal. Revoked memberships are excluded; carrying them across would re-seal withdrawn access.
+
+`accepted_at` is deliberately not cleared. Acceptance records that this user checked somebody *else's* fingerprint, and changing their own keys says nothing about that.
+
+`rotation_payload` is stored byte-exact and must never be cast (same rule as `vault_memberships.grant_payload`). The server compares its fields against the row but does **not** verify the signature — it publishes the key it would check against, so it would only be checking its own work. Guarded by tests/Feature/Vault/IdentityRotationTest.php.
+
+## A re-seal is not an edit, and needs its compare-and-swap
+`previous_digest` is load-bearing. Each item carries the BLAKE2b digest of the ciphertext its plaintext was decrypted from, and the write applies only while the row still holds it. Without it, a tab that decrypted an hour ago writes hour-old plaintext back under a fresh envelope — well formed, correctly bound, genuinely freshly sealed, and wrong. Nothing downstream would catch it. A mismatched row is skipped, not refused: somebody wrote it, which puts it on the current version anyway.
+
+The plaintext does not change, so nothing may behave as though it did — no version archived, `current_version` unmoved, `updated_at` untouched, one `vault.resealed` with a count rather than a run of `*.updated` entries. A false history in an append-only table cannot be corrected.
+
+Deliberately **not** atomic, unlike the re-key: both envelope versions open, so each row is correct on its own and a half-finished pass leaves nothing to repair. That is what lets it batch and resume; do not "fix" it into an all-or-nothing submission.
+
+`secret_versions` is absent from `ResealTarget` and must stay absent — an archive that could be rewritten is a rollback channel for a credential rotated because it leaked. Guarded by tests/Feature/Vault/ResealTest.php.

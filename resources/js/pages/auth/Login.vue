@@ -17,6 +17,7 @@ const password = ref('');
 const totpCode = ref('');
 const needsSecondFactor = ref(false);
 const busy = ref(false);
+const upgrading = ref(false);
 const failure = ref('');
 
 const { crypto: cryptoClient } = useSession();
@@ -26,6 +27,8 @@ const ready = computed(() => email.value.trim() !== '' && password.value !== '')
 interface LoginResponse {
     redirect: string;
     bundle: { wrappedUserKey: string; userKeyAad: AadParams };
+    /** Raised Argon2id parameters this account should move to, or null. */
+    kdfUpgrade: KdfParams | null;
 }
 
 /**
@@ -69,6 +72,10 @@ async function submit(): Promise<void> {
             userKeyAad: response.bundle.userKeyAad,
         });
 
+        if (response.kdfUpgrade) {
+            await upgradeKdf(authKey, response.kdfUpgrade, response.bundle.userKeyAad);
+        }
+
         router.visit(response.redirect);
     } catch (cause) {
         /*
@@ -88,6 +95,51 @@ async function submit(): Promise<void> {
         needsSecondFactor.value = true;
     } finally {
         busy.value = false;
+    }
+}
+
+/**
+ * Re-stretches the same password at the deployment's current parameters.
+ *
+ * **This is the only moment it can happen.** Re-wrapping the User Key needs a
+ * KEK, a KEK needs the password, and the password exists in this browser for the
+ * length of this form submission and nowhere else — not in the Worker after
+ * unlock, not on the server, not in any store. A settings page could not offer
+ * this without asking for the password again, at which point it is not silent.
+ *
+ * **A failure here must not fail the login.** The user typed the right password
+ * and the server accepted it; the account is simply left on its old parameters,
+ * which is where it already was. Swallowing the error is right, and it is the
+ * one place in this codebase where that is true — so the reason is written down
+ * rather than left as an empty catch.
+ */
+async function upgradeKdf(currentAuthKey: Uint8Array, params: KdfParams, aad: AadParams): Promise<void> {
+    upgrading.value = true;
+
+    try {
+        const salt = crypto.getRandomValues(new Uint8Array(16));
+
+        const { authKey, wrappedUserKey } = await cryptoClient().rewrapForPassword({
+            password: password.value,
+            kdfSalt: salt,
+            kdfParams: params,
+            userKeyAad: aad,
+        });
+
+        await postJson('/account/kdf', {
+            // Proof of the current password. Without it this endpoint would let
+            // anything that can make one request re-wrap the User Key under a
+            // password of its own choosing — see the note on the controller.
+            current_auth_key: toBase64(currentAuthKey),
+            kdf_salt: toBase64(salt),
+            kdf_params: params,
+            auth_key: toBase64(authKey),
+            wrapped_user_key: toBase64(wrappedUserKey),
+        });
+    } catch {
+        // Deliberately silent. See above.
+    } finally {
+        upgrading.value = false;
     }
 }
 </script>
@@ -120,7 +172,12 @@ async function submit(): Promise<void> {
                 {{ busy ? 'unlocking…' : 'sign in' }}
             </button>
 
-            <p v-if="busy" class="text-2xs text-muted">
+            <p v-if="upgrading" class="text-2xs text-muted">
+                Re-stretching at this server's current settings. Your password has not changed — only how hard
+                it is to attack. This happens once.
+            </p>
+
+            <p v-else-if="busy" class="text-2xs text-muted">
                 Stretching your password. Deliberately slow, and done here rather than on the server.
             </p>
 

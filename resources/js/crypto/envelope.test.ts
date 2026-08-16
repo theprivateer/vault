@@ -1,7 +1,16 @@
+import { xchacha20poly1305 } from '@noble/ciphers/chacha.js';
 import { describe, expect, it } from 'vitest';
 
 import type { AadParams } from './aad';
-import { ALG_XCHACHA20_POLY1305, ENVELOPE_VERSION, MIN_ENVELOPE_LENGTH, open, seal } from './envelope';
+import { buildAad } from './aad';
+import {
+    ALG_XCHACHA20_POLY1305,
+    ENVELOPE_VERSION,
+    LEGACY_ENVELOPE_VERSION,
+    MIN_ENVELOPE_LENGTH,
+    open,
+    seal,
+} from './envelope';
 import {
     IntegrityError,
     InvalidParameterError,
@@ -30,6 +39,81 @@ describe('round trip', () => {
         const plaintext = utf8ToBytes('{"key":"AWS root — production","value":"hunter2 🔐"}');
 
         expect(open(k, seal(k, plaintext, aad), aad)).toEqual(plaintext);
+    });
+});
+
+/*
+ | Version 2, and the reason it exists.
+ |
+ | In version 1 the two header bytes lived outside the associated data. Nothing
+ | in the construction said they could not be edited — a downgrade failed only
+ | because the tag happened not to verify under the other code path. Version 2
+ | puts `ver` and `alg` inside the AAD, which makes that a statement rather than
+ | a coincidence.
+ |
+ | The v1 envelopes here are built by hand from the primitive rather than by an
+ | old copy of `seal`, because the point is to prove this code can still read
+ | bytes it will never again write. A fixture produced by the code under test
+ | would prove considerably less.
+ */
+describe('envelope versions', () => {
+    function legacyEnvelope(k: Uint8Array, plaintext: Uint8Array, params: AadParams): Uint8Array {
+        const nonce = randomBytes(24);
+        // Version 1 associated data: the record binding alone, no header.
+        const body = xchacha20poly1305(k, nonce, buildAad(params)).encrypt(plaintext);
+
+        return Uint8Array.from([LEGACY_ENVELOPE_VERSION, ALG_XCHACHA20_POLY1305, ...nonce, ...body]);
+    }
+
+    it('still opens a version 1 envelope, which nothing writes any more', () => {
+        const k = key();
+        const plaintext = utf8ToBytes('written before Phase 10');
+
+        expect(open(k, legacyEnvelope(k, plaintext, aad), aad)).toEqual(plaintext);
+    });
+
+    /*
+     | The attack version 2 is for. A stored v2 envelope relabelled as v1 is
+     | opened with the v1 associated data, which is not what it was sealed under.
+     | Dispatching on an attacker-controlled byte is safe precisely because the
+     | tag validates the dispatch.
+     */
+    it('refuses a version 2 envelope relabelled as version 1', () => {
+        const k = key();
+        const envelope = seal(k, utf8ToBytes('x'), aad);
+
+        envelope[0] = LEGACY_ENVELOPE_VERSION;
+
+        expect(() => open(k, envelope, aad)).toThrow(IntegrityError);
+    });
+
+    it('refuses a version 1 envelope relabelled as version 2', () => {
+        const k = key();
+        const envelope = legacyEnvelope(k, utf8ToBytes('x'), aad);
+
+        envelope[0] = ENVELOPE_VERSION;
+
+        expect(() => open(k, envelope, aad)).toThrow(IntegrityError);
+    });
+
+    /*
+     | `alg` is inside the AAD too, so a future second algorithm cannot be
+     | swapped in under an existing ciphertext. Asserted with a value this build
+     | does not support, which reaches the header check first — the point is that
+     | neither byte is editable, by either route.
+     */
+    it('binds the algorithm byte as well as the version', () => {
+        const k = key();
+        const envelope = seal(k, utf8ToBytes('x'), aad);
+
+        envelope[1] = 2;
+
+        expect(() => open(k, envelope, aad)).toThrow(UnsupportedEnvelopeError);
+    });
+
+    it('writes version 2 and nothing else', () => {
+        expect(ENVELOPE_VERSION).toBe(2);
+        expect(seal(key(), utf8ToBytes('x'), aad)[0]).toBe(2);
     });
 });
 
@@ -180,7 +264,7 @@ describe('rejected inputs', () => {
 
     it.each([
         [0, ALG_XCHACHA20_POLY1305],
-        [2, ALG_XCHACHA20_POLY1305],
+        [3, ALG_XCHACHA20_POLY1305],
         [ENVELOPE_VERSION, 0],
         [ENVELOPE_VERSION, 2],
         [99, 99],

@@ -2,14 +2,15 @@ import { describe, expect, it } from 'vitest';
 
 import type { AadParams } from '../aad';
 import { InvalidParameterError } from '../errors';
-import { verifyGrant } from '../grant';
-import { deriveFromPassword, generateKdfSalt, generateKey, wrapKey } from '../keys';
+import { fingerprintHex, verifyGrant } from '../grant';
+import { deriveFromPassword, generateKdfSalt, generateKey, sealTo, wrapKey } from '../keys';
 import { utf8ToBytes } from '../primitives';
+import { verifyRotation } from '../rotation';
 import type { Handler, WorkerScope } from './handler';
 import { createHandler, installHandler, serialiseError } from './handler';
 import type { RegistrationResult } from './keyring';
 import { Keyring } from './keyring';
-import type { Reply, Request } from './protocol';
+import type { Reply, Request, RotationResult } from './protocol';
 import { ED25519_KEY, USER_KEY, X25519_KEY } from './protocol';
 
 const FAST_KDF = { m: 8, t: 1, p: 1 };
@@ -222,6 +223,72 @@ describe('item key operations', () => {
         expect(
             verifyGrant(signed.signature, signed.payload, registration.ed25519PublicKey, grant),
         ).toMatchObject({ valid: true });
+    });
+
+    /*
+     | Rotation is one op rather than several because the pieces are only correct
+     | together. Splitting it would mean a `sealToPublicKey` on the identity keys
+     | — the exact operation UNSEALABLE exists to refuse — so this checks the
+     | whole thing arrives through the protocol as a single request.
+     */
+    it('rotates an identity and certifies it with the retired key', () => {
+        const handler = createHandler();
+
+        const registration = handler({
+            op: 'register',
+            password: PASSWORD,
+            kdfSalt: generateKdfSalt(),
+            kdfParams: FAST_KDF,
+            uuid: SUBJECT,
+        }) as RegistrationResult;
+
+        for (const [handle, context] of [
+            [X25519_KEY, 'user.privkey.x25519'],
+            [ED25519_KEY, 'user.privkey.ed25519'],
+        ] as const) {
+            handler({
+                op: 'unwrapInto',
+                handle,
+                using: USER_KEY,
+                wrapped:
+                    context === 'user.privkey.x25519'
+                        ? registration.x25519PrivateKeyCt
+                        : registration.ed25519PrivateKeyCt,
+                aad: { context, subject: SUBJECT, version: 1 },
+            });
+        }
+
+        const membership = '0192f3a1-4b2c-7d3e-8f90-a1b2c3d4e5aa';
+        const vaultKey = generateKey();
+        const membershipAad: AadParams = {
+            context: 'vault.membership.key',
+            subject: membership,
+            version: 1,
+        };
+
+        const result = handler({
+            op: 'rotateIdentity',
+            uuid: SUBJECT,
+            rotatedAt: '2026-08-16T09:00:00Z',
+            memberships: [
+                { uuid: membership, sealed: sealTo(registration.x25519PublicKey, vaultKey, membershipAad) },
+            ],
+        }) as RotationResult;
+
+        expect(
+            verifyRotation(
+                result.certificate.signature,
+                result.certificate.payload,
+                registration.ed25519PublicKey,
+                {
+                    userUuid: SUBJECT,
+                    previousFingerprint: fingerprintHex(registration.fingerprint),
+                    fingerprint: fingerprintHex(result.fingerprint),
+                },
+            ).certified,
+        ).toBe(true);
+
+        expect(result.memberships).toHaveLength(1);
     });
 });
 

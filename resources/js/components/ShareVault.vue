@@ -321,8 +321,28 @@ function transfer(membership: MembershipRecord): void {
                 exists on this screen, and re-verifying is a separate action
                 whose wording says what it costs.
             -->
-            <NoticePanel v-if="check.status === 'changed'" tone="accent" heading="stop — these keys changed">
+            <!--
+                Still a hard stop when the change carries a signed notice from
+                the keys you pinned, and the heading says so — but the two
+                situations get different words. Somebody shown the same red
+                screen for a colleague's routine rotation and for an active
+                attack learns to click through it, and then the stop is worth
+                nothing when it matters.
+            -->
+            <NoticePanel
+                v-if="check.status === 'changed'"
+                tone="accent"
+                :heading="
+                    check.certified
+                        ? 'these keys were replaced — check the new ones'
+                        : 'stop — these keys changed'
+                "
+            >
                 <p>{{ check.detail }}</p>
+                <p v-if="check.certified && check.rotatedAt" class="mt-3 text-2xs text-faint">
+                    The notice says this happened on
+                    {{ new Date(check.rotatedAt).toLocaleDateString() }}.
+                </p>
                 <p class="mt-3">
                     Do not continue until you have confirmed the fingerprint above with them through a channel
                     this server does not control — in person, or a call where you recognise the voice.

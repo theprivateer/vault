@@ -595,6 +595,89 @@ Rotate a vault key, a user's identity keys and the KDF parameters — each witho
 each verifiable. Run a full v1 → v2 envelope migration on a seeded database. The verification
 command reports clean, and reports correctly when a fault is injected.
 
+### Carried forward from Phase 10
+
+All six tasks are built. Tests: `tests/Feature/Vault/KeyLifecycleTest.php` for rotation on demand,
+the reminder and both commands; `IdentityRotationTest.php` for the completeness rule and what peers
+are served afterwards; `KdfUpgradeTest.php` for the silent upgrade and the two ways it must refuse;
+`resources/js/crypto/rotation.test.ts` and `worker/keyring.test.ts` for the certificate and the
+re-sealing; `envelope.test.ts` for v1 → v2.
+
+**Identity rotation is self-service, and that is the finding rather than the feature.** The user
+still holds their *old* private key, so their own browser opens every sealed Vault Key and re-seals
+it to a fresh pair — no vault owner acts, no Vault Key changes, nothing is re-encrypted. The whole
+operation is one request that the server accepts only with a complete membership set, because the old
+private key is discarded when it lands and a membership left out would be a sealed key nothing could
+ever open again. Same failure as a partial vault re-key, same refusal.
+
+**Three additions this plan did not ask for, each with a reason recorded where it is implemented.**
+
+*Rotation certificates.* Task 2 required that republishing "must trigger a re-verify prompt rather
+than a silent accept", which the existing hard stop already satisfied with no new code. The stop was
+nonetheless carrying no information: "they rotated" and "you are being attacked" arrived as the same
+red screen. The outgoing Ed25519 key now signs a statement naming its successor, so the interstitial
+can say which of the two it is looking at. It never becomes an accept — a stolen key signs a perfect
+certificate, which is the case rotation most often exists for, and the tests say so directly.
+
+*Past fingerprints.* A grant names the fingerprint it was issued to. Without keeping the user's
+retired ones, rotating would have made every vault anybody had shared with them render as
+unverifiable — over a change they made themselves.
+
+*The KDF upgrade endpoint demands the current auth key.* Without it, injected script could ask the
+Worker to re-wrap the User Key under a password of its own choosing and post the result; the server
+cannot inspect a wrapping, so nothing else distinguishes that from a genuine upgrade. It also refuses
+parameters weaker than the account or the deployment already uses, compared per parameter rather than
+as a combined cost — memory hardness cannot be traded for passes.
+
+**Envelope v2 is a real change, not a version bump.** It puts `ver` and `alg` inside the associated
+data. In v1 those two bytes sat outside it, so a downgrade failed only because the tag happened not
+to verify under the other code path — true, and accidental. Both versions open; only v2 is written.
+
+**Two departures from the task list.**
+
+*Scheduled rotation is a reminder, not a job*, because it cannot be anything else: rotating needs a
+member's browser, since only a member can unwrap the current Vault Key. It is also **off by default**,
+which is a judgement rather than an omission — rotation leaves every payload ciphertext untouched, so
+a calendar interval bounds how long a leaked Vault Key keeps opening things written *after* the leak
+and nothing else. Useful when you think a key escaped; close to ritual otherwise.
+
+*The health dashboard is a command, not a page.* D11 has no organisation layer and there is no
+administrator role; inventing one to host a dashboard would grant somebody a view over everybody
+else's accounts that the product otherwise refuses. An operator has shell access by definition.
+`vault:health` is the deployment-wide answer, and each user sees the part that is theirs to act on
+where they can act on it — a vault's rotation age on the vault, their own KDF state on their keys
+page.
+
+**The migration is an operation, not a job**, since no server-side pass is possible — this one cannot
+decrypt. It happens in two halves. A re-key already brings every *wrapped key* onto the current
+version as a side effect. Payloads needed their own path: "re-wrap lazily on write" is true and is
+not a migration, because the payloads nobody edits are the majority and the long-lived ones, so on
+its own it means "never, for exactly the data that matters most".
+
+So `/vaults/{vault}/reseal` opens each payload and seals the same bytes again. Three things separate
+it from an ordinary write, and each one is a decision rather than plumbing:
+
+- **A compare-and-swap on the ciphertext it replaces.** Without it this feature is a data-loss bug: a
+  tab that decrypted an hour ago would write hour-old plaintext back under a fresh envelope, and
+  every check downstream would pass — well formed, correctly bound, genuinely freshly sealed. Only
+  the bytes it replaced would know.
+- **It is not an edit.** No version archived, `current_version` unmoved, `updated_at` untouched, one
+  `vault.resealed` with a count rather than a run of changes that never happened.
+- **It is not atomic, on purpose.** Both versions open, so every row is correct on its own — which is
+  what lets it batch, resume and be abandoned midway with nothing to repair. The opposite of the
+  re-key, and for the opposite reason.
+
+**Outstanding:** archived versions cannot be moved and never will be. `secret_versions` is immutable
+by design, so those rows stay on v1 until retention removes them; `vault:health` counts them apart
+from the movable ones, because a number that cannot reach zero is a number people stop reading.
+Dropping support for v1 would make every remaining row unreadable rather than upgraded — which is
+why `Envelope::SUPPORTED_VERSIONS` carries a warning against trimming it.
+
+Also outstanding, and worth naming: `vault:verify-keys` checks **structure only**. It cannot tell
+whether a wrapped Item Key opens under the Vault Key it claims to be wrapped by — the server holds no
+key — and the command says so on every run, including a clean one, because "no faults found" invites
+exactly the reading a green result should not license.
+
 ---
 
 ## Phase 11 — Hardening & verification

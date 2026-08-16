@@ -7,6 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Auth\LoginRequest;
 use App\Models\User;
 use App\Support\AuditLog;
+use App\Support\KdfPolicy;
 use App\Support\Totp;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -90,6 +91,18 @@ class LoginController extends Controller
         return response()->json([
             'redirect' => route('vaults.index'),
             'bundle' => $user->unlockBundle(),
+
+            /*
+             | The parameters this account should move to, or null (Phase 10).
+             |
+             | Answered here rather than left to the client to work out, because
+             | the client would have to be told the deployment default anyway and
+             | then two places would decide what "behind" means. Login is also
+             | the only moment the upgrade is possible: it needs the password,
+             | and the password exists in the browser for the length of this one
+             | form submission.
+             */
+            'kdfUpgrade' => KdfPolicy::upgradeFor($user),
         ]);
     }
 
