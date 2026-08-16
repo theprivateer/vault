@@ -5,7 +5,7 @@ Before planning or editing, find the row whose globs match the file's path and r
 | Applies to | Rule file |
 | --- | --- |
 | app/** | .ai/rules/app.md |
-| app/Http/Controllers/SecretController.php, app/Http/Controllers/VaultRekeyController.php, app/Http/Controllers/FileChunkController.php, app/Http/Controllers/ShareLinkController.php | .ai/rules/controllers.md |
+| app/Http/Controllers/SecretController.php, app/Http/Controllers/VaultRekeyController.php, app/Http/Controllers/FileChunkController.php, app/Http/Controllers/ShareLinkController.php, app/Http/Controllers/VaultOwnershipController.php, app/Http/Controllers/VaultController.php | .ai/rules/controllers.md |
 | resources/js/crypto/**, resources/js/crypto/padding.ts, resources/js/crypto/grant.ts, resources/js/crypto/chunks.ts, resources/js/crypto/audit.ts | .ai/rules/crypto.md |
 | docs/** | .ai/rules/docs.md |
 | resources/js/** | .ai/rules/js.md |

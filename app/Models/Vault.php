@@ -100,6 +100,26 @@ class Vault extends Model
     }
 
     /**
+     * How many people other than this one still hold a key to the vault.
+     *
+     * Counted from live memberships rather than from `owner_id`, because a
+     * membership row *is* a sealed copy of the Vault Key. Deleting a vault that
+     * has any leaves those copies wrapping rows nobody can reach — the members
+     * keep a key and lose everything it opens — which is why deletion is refused
+     * until the vault has been handed over or everyone else has been revoked.
+     *
+     * Revoked rows do not count. Their access was already cut, and their sealed
+     * key opens nothing written since the re-key that revocation demanded.
+     */
+    public function otherLiveMembers(User $user): int
+    {
+        return $this->memberships()
+            ->whereNull('revoked_at')
+            ->where('user_id', '!=', $user->getKey())
+            ->count();
+    }
+
+    /**
      * How many superseded payloads a secret in this vault keeps.
      *
      * Null on the column means "whatever the deployment's default is", so

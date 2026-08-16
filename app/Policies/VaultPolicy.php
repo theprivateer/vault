@@ -43,7 +43,39 @@ class VaultPolicy
             : Response::denyAsNotFound();
     }
 
+    /**
+     * Deleting the vault.
+     *
+     * Administrators only — and notice what this does *not* decide. Whether the
+     * vault is in a state where deletion is meaningful is a different question
+     * with a different answer shape: a vault with other members has to be handed
+     * over first, and telling its owner "404" would be answering a question they
+     * did not ask. That guard lives in the controller and reports as a
+     * validation error, the same way a re-key at the wrong epoch does. The 404
+     * rule is about strangers probing UUIDs, not about members being told why
+     * their own vault will not go.
+     */
     public function delete(User $user, Vault $vault): Response
+    {
+        return $vault->roleFor($user)?->canAdminister() === true
+            ? Response::allow()
+            : Response::denyAsNotFound();
+    }
+
+    /**
+     * Handing the vault to somebody else.
+     *
+     * Its own ability rather than a reuse of `share`, because it is its own
+     * power: sharing adds a reader, and this gives away everything — including
+     * the ability to revoke the person doing the giving.
+     *
+     * Worth being exact about what transfer moves, since the name oversells it.
+     * It moves an *authorisation* fact. The recipient already holds the Vault
+     * Key — that is what being a member means — so nothing is sealed, nothing is
+     * rotated, and the outgoing owner does not lose the ability to decrypt
+     * anything. Only a revocation followed by a re-key does that.
+     */
+    public function transfer(User $user, Vault $vault): Response
     {
         return $vault->roleFor($user)?->canAdminister() === true
             ? Response::allow()

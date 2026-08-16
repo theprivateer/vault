@@ -316,16 +316,42 @@ Grant, accept, revoke — with fingerprint verification, signed grants and re-ke
 
 ### Carried forward from Phase 5
 
-Tasks 1–8 are built and every exit criterion above has a passing test. **Task 9 is not.** Ownership
-transfer and the guard against deleting a shared vault are both still outstanding, and the two are
-the same problem seen from either end: a vault with other members must have somewhere to go before
-its owner can leave, or the members are left holding a Vault Key that wraps rows nobody can reach.
-The deletion semantics in [04](04-data-model.md#cascade-and-deletion-semantics) already say the UI
-blocks deletion until a transfer has happened; the UI does not yet block it.
+All nine tasks are built and every exit criterion above has a passing test.
 
-What *is* in place is the narrower guard underneath: `VaultMembershipPolicy` refuses to revoke an
-owner's membership, so the last administrator cannot be removed by the revocation path. Deleting
-the vault outright is the route that is still open.
+**Task 9 arrived last, and it is smaller than its name suggests.** Transfer moves an *authorisation*
+fact and nothing else: the recipient must already be a member, which means the Vault Key is already
+sealed to their public key on their own membership row, so nothing is re-encrypted, no epoch
+advances and no ciphertext is touched. `tests/Feature/Vault/OwnershipTest.php` asserts exactly that,
+because a "transfer" that quietly re-keyed would be a much more expensive operation wearing the same
+button.
+
+The corollary is the part the interface has to say out loud, and does: **the outgoing owner keeps
+their key.** They become an editor, they can still read everything, and no server-side change alters
+that. Getting somebody out of a vault is revocation followed by a re-key. What transfer does change
+is that the option exists at all — an administrator cannot be revoked, so before this the owner was
+immovable, and the vault they owned could never be handed on or wound up.
+
+Three conditions on the recipient, each of them a way to otherwise create an owner who cannot own
+anything: a live membership (ownership without a sealed Vault Key is a title over something you
+cannot open), the current key epoch (a stranded membership holds a key that unwraps nothing, and its
+holder could not rotate the vault back), and an accepted grant (administration is the last thing to
+hand to an account that has not yet confirmed your fingerprint).
+
+The deletion guard is the same problem from the other end. A vault with any live membership other
+than your own refuses to be deleted, because their access *is* a sealed copy of the Vault Key on a
+row — deleting the vault under them is a revocation performed by a route that never mentions
+revocation, and without the audit trail one would have left. Revoked rows do not count; a guard that
+never releases would leave any vault that had ever been shared permanently undeletable.
+
+The refusal is a validation error rather than a 403, which is a deliberate departure from the
+404-not-403 rule in [02](02-threat-model.md#security-requirements). That rule protects against
+strangers probing UUIDs. Here the caller is an authorised administrator being told about state, and
+answering 404 to somebody's own vault would be replying to a question they did not ask.
+
+**Not built, and worth naming:** there is no way to leave a vault under your own steam. Revocation is
+an administrator's ability, so an editor — including a demoted former owner — has to be let out by
+the current owner rather than walking. That is pre-existing behaviour for every non-owner and not
+something transfer introduced, but transfer is the first time it becomes conspicuous.
 
 ---
 

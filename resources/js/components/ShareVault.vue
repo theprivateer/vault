@@ -45,8 +45,22 @@ const candidate = ref<PublicIdentity | null>(null);
 const check = ref<IdentityCheck | null>(null);
 const failure = ref('');
 const busy = ref(false);
+const handingOverTo = ref<MembershipRecord | null>(null);
+const transferFailure = ref('');
 
 const existing = computed(() => new Set(props.members.map((membership) => membership.member.uuid)));
+
+/**
+ * Who this vault could be handed to.
+ *
+ * The same three conditions the server enforces, so the list never offers a
+ * choice that would be refused: a live membership (which is what `members`
+ * holds), not already the owner, and an accepted grant — administration is the
+ * last thing to hand to somebody who has not yet confirmed your fingerprint.
+ */
+const successors = computed(() =>
+    props.members.filter((membership) => membership.role !== 'owner' && membership.acceptedAt !== null),
+);
 
 const alreadyMember = computed(() => candidate.value !== null && existing.value.has(candidate.value.uuid));
 
@@ -199,6 +213,29 @@ async function share(): Promise<void> {
 function revoke(membership: MembershipRecord): void {
     router.delete(`/memberships/${membership.uuid}`);
 }
+
+/**
+ * Hands the vault over.
+ *
+ * No crypto, and that is worth noticing rather than glossing: every other write
+ * on this screen seals something first, because it changes who can decrypt.
+ * This one changes who may administer, and the recipient has held a copy of the
+ * Vault Key since the moment they were granted access. There is nothing to seal.
+ */
+function transfer(membership: MembershipRecord): void {
+    transferFailure.value = '';
+    handingOverTo.value = null;
+
+    router.patch(
+        `/vaults/${props.vault.uuid}/owner`,
+        { user_uuid: membership.member.uuid },
+        {
+            onError: (errors) => {
+                transferFailure.value = Object.values(errors)[0] ?? 'This vault could not be handed over.';
+            },
+        },
+    );
+}
 </script>
 
 <template>
@@ -320,5 +357,67 @@ function revoke(membership: MembershipRecord): void {
         </div>
 
         <p v-if="pins.failure" class="mt-4 text-2xs text-accent">{{ pins.failure }}</p>
+
+        <!--
+            Handing the vault over. Shown only when there is somebody to hand it
+            to, because a section offering an empty list would read as a broken
+            feature rather than an inapplicable one.
+        -->
+        <div v-if="successors.length" class="mt-8 border-t border-line pt-6">
+            <h3 class="text-2xs tracking-[0.08em] text-faint uppercase">hand this vault over</h3>
+
+            <p class="mt-3 max-w-prose text-2xs text-muted">
+                They become the owner and you become an editor. Nothing is re-encrypted, because they already
+                hold the key — this changes who may share, revoke, re-key and delete. You keep your own copy
+                of the key and can still read everything here; if the point is to leave, ask the new owner to
+                revoke you afterwards, which prompts them to re-key.
+            </p>
+
+            <p class="mt-3 max-w-prose text-2xs text-faint">
+                It also lets you delete a vault you no longer need: while anyone else has access, deleting is
+                refused, since it would leave them holding a key to rows that have gone.
+            </p>
+
+            <NoticePanel v-if="transferFailure" tone="accent" class="mt-4">{{ transferFailure }}</NoticePanel>
+
+            <ul class="mt-4 space-y-2">
+                <li
+                    v-for="membership in successors"
+                    :key="membership.uuid"
+                    class="flex items-baseline justify-between gap-4"
+                >
+                    <span class="text-2xs text-muted">
+                        {{ membership.member.displayName }}
+                        <span class="text-faint">@{{ membership.member.handle }}</span>
+                    </span>
+                    <button
+                        type="button"
+                        class="text-2xs text-muted hover:text-accent"
+                        @click="handingOverTo = membership"
+                    >
+                        make owner
+                    </button>
+                </li>
+            </ul>
+
+            <NoticePanel
+                v-if="handingOverTo"
+                tone="accent"
+                :heading="`hand this vault to ${handingOverTo.member.displayName}?`"
+                class="mt-4"
+            >
+                <p>
+                    {{ handingOverTo.member.displayName }} becomes the owner and you become an editor. They
+                    will be able to revoke your access; you will not be able to revoke theirs. This cannot be
+                    undone from your side.
+                </p>
+                <div class="mt-3 flex gap-3">
+                    <button type="button" class="btn btn-primary" @click="transfer(handingOverTo)">
+                        hand it over
+                    </button>
+                    <button type="button" class="btn" @click="handingOverTo = null">cancel</button>
+                </div>
+            </NoticePanel>
+        </div>
     </section>
 </template>

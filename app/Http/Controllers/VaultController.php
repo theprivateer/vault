@@ -14,6 +14,7 @@ use App\Support\AuditLog;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -159,12 +160,35 @@ class VaultController extends Controller
     }
 
     /**
-     * Soft delete, per the 30-day grace period in docs/04-data-model.md. The job
-     * that hard-deletes the rows and their object-storage blobs arrives with
-     * files in Phase 6.
+     * Soft delete, per the 30-day grace period in docs/04-data-model.md.
+     *
+     * **A vault with other members cannot be deleted.** Their access is a sealed
+     * copy of the Vault Key on a membership row, so deleting the vault leaves
+     * every one of them holding a working key to rows that have gone — access
+     * withdrawn by a route that never mentions access, and without the audit
+     * trail a revocation would have left. Ownership has to be handed over, or
+     * everybody else revoked, first.
+     *
+     * Reported as a validation error rather than a 403, and the distinction is
+     * the same one the concurrent-edit rule draws: the caller is authorised and
+     * the request is refused on state. A 403 renders as an error page and says
+     * nothing about what to do; this puts a sentence next to the button.
      */
-    public function destroy(Vault $vault): RedirectResponse
+    public function destroy(Request $request, Vault $vault): RedirectResponse
     {
+        $others = $vault->otherLiveMembers($this->currentUser($request));
+
+        if ($others > 0) {
+            throw ValidationException::withMessages([
+                'vault' => $others === 1
+                    ? 'One other person has access to this vault. Hand it over to them, or revoke '
+                        .'their access, before deleting it — otherwise they keep a key to something '
+                        .'that is no longer there.'
+                    : "{$others} other people have access to this vault. Hand it over to one of "
+                        .'them, or revoke the rest, before deleting it — otherwise they keep keys '
+                        .'to something that is no longer there.',
+            ]);
+        }
 
         $vault->delete();
 

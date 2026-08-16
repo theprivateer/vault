@@ -33,6 +33,19 @@ enum AuditAction: string
     case VaultRekeyed = 'vault.rekeyed';
 
     /**
+     * Ownership transfer (Phase 5, task 9).
+     *
+     * Recorded against the *recipient's* membership rather than the vault,
+     * because the row that changed meaning is theirs, and it names who received
+     * the vault without putting a second copy of their handle in `metadata`.
+     *
+     * The outgoing owner's demotion to editor is not a second event. It is the
+     * deterministic other half of this one — a vault has exactly one owner — and
+     * the actor on this row is the person it happened to.
+     */
+    case VaultOwnershipTransferred = 'vault.ownership_transferred';
+
+    /**
      * Reported by the browser, not observed here.
      *
      * The server never learns that a vault was unlocked — unwrapping happens in
@@ -133,6 +146,7 @@ enum AuditAction: string
             self::VaultUpdated => 'renamed this vault',
             self::VaultDeleted => 'deleted this vault',
             self::VaultRekeyed => 'rotated this vault’s key',
+            self::VaultOwnershipTransferred => 'handed this vault over, and became an editor of it',
             self::VaultUnlocked => 'unlocked this vault',
             self::LockboxCreated => 'created a lockbox',
             self::LockboxUpdated => 'renamed a lockbox',

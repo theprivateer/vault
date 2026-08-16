@@ -480,6 +480,22 @@ working credential somewhere it does not need to be. See
   with other members must be transferred first, and the UI blocks deletion until they are.
   Their `audit_events` rows are retained with `actor_id` nulled — deleting them would break the
   hash chain, which is the point of the chain.
+
+  **`DELETE /vaults/{vault}` refuses while any live membership other than the caller's exists**, and
+  the refusal is a validation error rather than a 403 — the caller is an authorised administrator
+  being told about state, not a stranger probing an identifier. A membership row is a sealed copy of
+  the Vault Key, so deleting the vault under its other members withdraws their access by a route
+  that never mentions access, and leaves none of the trail a revocation would. Revoked rows are not
+  counted: that access was already cut, and a guard that never releases would make any vault that
+  had ever been shared permanently undeletable.
+- Ownership transfer → `PATCH /vaults/{vault}/owner` moves `vaults.owner_id`, promotes the
+  recipient's membership to `owner` and demotes the caller's to `editor`, in one transaction with
+  the vault row locked so that two administrators acting at once cannot produce two owners. **No
+  ciphertext changes and `key_epoch` does not move**, because the recipient has held a sealed Vault
+  Key since they were granted access — transfer moves an authorisation fact, not a cryptographic
+  one. The recipient must be a live member, at the current epoch, with `accepted_at` set. The
+  outgoing owner keeps their sealed key and can still decrypt everything; only revocation plus a
+  re-key changes that.
 - Secret delete → soft delete; its versions stay, because a restorable secret with no history
   would come back missing most of what it was. A hard delete cascades them.
 - Membership revoke → sets `revoked_at` and `vaults.rekey_required_at` in one transaction.

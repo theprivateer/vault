@@ -4,6 +4,8 @@ paths:
   - app/Http/Controllers/VaultRekeyController.php
   - app/Http/Controllers/FileChunkController.php
   - app/Http/Controllers/ShareLinkController.php
+  - app/Http/Controllers/VaultOwnershipController.php
+  - app/Http/Controllers/VaultController.php
 ---
 
 # Controllers
@@ -50,3 +52,17 @@ Never move the token to a route parameter (`/s/{token}`). A path segment is writ
 Which half goes where is load-bearing and easy to invert: the **creator** posts `token_hash`, so the server never holds a redeemable credential; the **recipient** posts the raw token and the server hashes it. Sending a hash at redemption instead would make the stored value the thing that opens a link, so any database reader could open every outstanding share.
 
 Free consequence worth keeping: a chat client unfurling the link fetches `GET /s` with no fragment, so a link preview cannot consume a view. Redemption checks and increments inside one `lockForUpdate` transaction, and consumes the view *before* responding — a lost response burns the view, which is the correct direction to fail. Every unopenable state answers with the same 404. Guarded by tests/Feature/Vault/ShareLinkTest.php.
+
+## Ownership transfer moves authorisation, never key material
+Transfer requires the recipient to already be a live member at the current epoch with `accepted_at` set, because their membership row already holds the Vault Key sealed to them. So nothing is re-encrypted, `key_epoch` does not move, and the request carries no ciphertext — the only write in this app that carries none. Do not "improve" it by re-sealing or rotating: that is a different, much more expensive operation.
+
+The outgoing owner is demoted to editor, never revoked. Revoking would delete the row holding their sealed key while they are still using the vault. It also unblocks leaving: `VaultMembershipPolicy::revoke` refuses to revoke any administrator, so before transfer existed the owner was immovable.
+
+Vault + membership writes happen in one transaction with the vault row `lockForUpdate` and the actor's ownership re-checked inside it — the policy ran on a row read outside the transaction, and two administrators acting at once would otherwise produce two owner rows. Guarded by tests/Feature/Vault/OwnershipTest.php.
+
+## A vault with other live members refuses to be deleted
+`destroy()` throws a ValidationException when `Vault::otherLiveMembers()` is non-zero. A membership row *is* a sealed copy of the Vault Key, so deleting the vault under its other members withdraws their access via a route that never mentions access, and leaves none of the trail a revocation would. Hand the vault over or revoke them first.
+
+Revoked rows are deliberately not counted — their access was already cut and the re-key that revocation demanded means their cached key opens nothing written since. Counting them would leave any vault that had ever been shared permanently undeletable.
+
+A validation error rather than a 403, and this is a considered departure from the 404-not-403 rule in .ai/rules/policies.md: that rule stops strangers probing UUIDs, whereas here the caller is an authorised administrator being told about state. The policy still answers 404 to anyone who is not an administrator.

@@ -51,9 +51,20 @@ const creating = ref(false);
 const name = ref('');
 const description = ref('');
 const createFailure = ref('');
+const deleteFailure = ref('');
 
 const canWrite = computed(() => props.vault.membership.role !== 'viewer');
 const isOwner = computed(() => props.vault.membership.role === 'owner');
+
+/**
+ * Everybody else who still holds a key to this vault.
+ *
+ * Drives the deletion guard. The server refuses the delete either way — this is
+ * a button that does not lie about what will happen, not a security control.
+ */
+const otherMembers = computed(() =>
+    props.members.filter((membership) => membership.member.uuid !== page.props.auth.user?.uuid),
+);
 
 /**
  * This user's own fingerprint, recomputed from their own keys.
@@ -170,7 +181,13 @@ async function create(): Promise<void> {
 }
 
 function destroy(): void {
-    router.delete(`/vaults/${props.vault.uuid}`);
+    deleteFailure.value = '';
+
+    router.delete(`/vaults/${props.vault.uuid}`, {
+        onError: (errors) => {
+            deleteFailure.value = Object.values(errors)[0] ?? 'This vault could not be deleted.';
+        },
+    });
 }
 </script>
 
@@ -260,8 +277,13 @@ function destroy(): void {
                 <button v-if="canWrite" type="button" class="btn" @click="creating = !creating">
                     {{ creating ? 'cancel' : 'new lockbox' }}
                 </button>
+                <!--
+                    Absent rather than disabled when other people hold a key.
+                    A greyed-out control invites hunting for the state that
+                    re-enables it; the panel below says what that state is.
+                -->
                 <button
-                    v-if="props.vault.membership.role === 'owner'"
+                    v-if="isOwner && !otherMembers.length"
                     type="button"
                     class="text-2xs text-muted hover:text-accent"
                     @click="destroy"
@@ -320,6 +342,10 @@ function destroy(): void {
         </div>
 
         <p v-else-if="!failure && !busy" class="mt-6 text-sm text-muted">No lockboxes in this vault yet.</p>
+
+        <NoticePanel v-if="deleteFailure" tone="accent" heading="not deleted" class="mt-6">
+            {{ deleteFailure }}
+        </NoticePanel>
 
         <RetentionSettings v-if="isOwner" :vault="props.vault" />
 

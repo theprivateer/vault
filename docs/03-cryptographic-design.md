@@ -453,6 +453,18 @@ Three details settled while building it in Phase 5:
 that is not in the vault is a client working from a stale picture, and the items it did send are
 then unlikely to be the whole set either.
 
+**Ownership transfer is not a cryptographic operation, and belongs here only to say so.** Handing a
+vault over requires the recipient to be an existing member, which means the Vault Key is already
+sealed to their public key on their own membership row. Nothing is re-encrypted, no epoch advances,
+and the request carries no key material at all — the only write in this application that does not.
+What moves is who may share, revoke, rotate and delete.
+
+The consequence is that transfer takes nothing away from the outgoing owner. They keep their sealed
+copy of the Vault Key and can decrypt everything in the vault afterwards exactly as before. Only
+revocation followed by a rotation changes that, at the cost above. An interface that let "transfer"
+imply otherwise would be making the same mistake as one that let "revoke" imply a past read could be
+retracted.
+
 ### Files
 
 Chunked AES-256-GCM via WebCrypto — the one place this design does not use

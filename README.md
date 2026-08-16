@@ -3,7 +3,7 @@
 A zero-knowledge, end-to-end encrypted secret manager. The server stores ciphertext and wrapped
 keys, and holds no key capable of decrypting any of it.
 
-This is a ground-up rebuild of a 2017 application of mine that got the structure right and the
+This is a ground-up rebuild of a [2017 project of mine](https://github.com/theprivateer/vault-2017) that got the structure right and the
 cryptography wrong: it encrypted secrets at rest with a single application-wide key, then decrypted
 them on the server before rendering. Anyone with the database and the `.env` had everything. This
 version moves the trust boundary into the browser.
@@ -96,7 +96,10 @@ single credential to somebody who has no account at all.
 
 - **Phase 5** — sharing by signed grant, trust-on-first-use fingerprint pinning with a hard stop
   when a key changes, and revocation that triggers an atomic re-key. The phase where the
-  asymmetric layer earns its place.
+  asymmetric layer earns its place. Ownership transfer closes it out, and is the one write here
+  that carries no key material at all: the recipient already holds the Vault Key, so handing a
+  vault over moves who may administer it and re-encrypts nothing. A vault with other members
+  refuses to be deleted, since their access *is* a sealed copy of that key.
 - **Phase 6** — encrypted file attachments: chunked AES-256-GCM through WebCrypto, with each
   chunk's index and its file's chunk count bound into the associated data, so truncation and
   reordering fail the tag rather than an application check. Resumable uploads, per-vault quotas, and

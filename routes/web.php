@@ -16,6 +16,7 @@ use App\Http\Controllers\ShareLinkController;
 use App\Http\Controllers\UserIdentityController;
 use App\Http\Controllers\VaultController;
 use App\Http\Controllers\VaultMembershipController;
+use App\Http\Controllers\VaultOwnershipController;
 use App\Http\Controllers\VaultRekeyController;
 use App\Http\Controllers\VaultRetentionController;
 use Illuminate\Support\Facades\Route;
@@ -158,6 +159,19 @@ Route::middleware('auth')->group(function (): void {
     Route::post('/vaults/{vault}/memberships', [VaultMembershipController::class, 'store'])
         ->middleware('can:share,vault')
         ->name('memberships.store');
+
+    /*
+     | Handing the vault over (Phase 5, task 9). Its own ability rather than a
+     | reuse of `share`, because it is the one grant that cannot be taken back by
+     | the person making it: the recipient can revoke them afterwards.
+     |
+     | PATCH on a singular sub-resource rather than a POST, because exactly one
+     | owner exists at a time and this replaces them — there is no collection of
+     | owners to add to.
+     */
+    Route::patch('/vaults/{vault}/owner', [VaultOwnershipController::class, 'update'])
+        ->middleware('can:transfer,vault')
+        ->name('vaults.owner.update');
 
     Route::middleware('can:rekey,vault')->group(function (): void {
         Route::get('/vaults/{vault}/rekey', [VaultRekeyController::class, 'create'])
