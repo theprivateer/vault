@@ -18,7 +18,6 @@
  * is open — which is stated on screen, because the recipient is usually not a
  * user of this system and has no reason to assume anything about it.
  */
-import { Head } from '@inertiajs/vue3';
 import { onMounted, ref } from 'vue';
 
 import NoticePanel from '@/components/NoticePanel.vue';
@@ -27,6 +26,7 @@ import { copyForATime, CLIPBOARD_TTL_MS } from '@/lib/clipboard';
 import { describeError } from '@/lib/errors';
 import type { SecretPayload } from '@/lib/items';
 import { revealShareLink } from '@/lib/sharelink';
+import { useDocumentTitle } from '@/lib/title';
 
 const credentials = ref<LinkCredentials | null>(null);
 const payload = ref<SecretPayload | null>(null);
@@ -88,12 +88,12 @@ async function copy(): Promise<void> {
     await copyForATime(payload.value.value);
     copied.value = true;
 }
+
+useDocumentTitle('Shared secret');
 </script>
 
 <template>
     <div class="mx-auto max-w-xl px-6 py-16">
-        <Head title="Shared secret" />
-
         <h1 class="text-base font-medium">a secret was shared with you</h1>
 
         <NoticePanel v-if="failure" tone="accent" heading="this link did not open" class="mt-6">

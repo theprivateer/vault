@@ -132,3 +132,64 @@ jobs:
       # that the pattern would still fire if a real call were added.
       - name: Assert no server-side decryption
         run: php artisan test --compact tests/Feature/NoServerDecryptionTest.php
+
+  # A running instance, scanned from the outside (Phase 11, task 9).
+  #
+  # Its own job because it is the only one here that needs the application
+  # actually serving traffic, and because it fails differently from the rest:
+  # everything else asserts something we decided, and this reports what a
+  # scanner finds without being told what to look for.
+  #
+  # It reaches the unauthenticated surface only — sign-in, recovery, the
+  # disclosure page, a share link. That is the surface a stranger has, which is
+  # the surface worth scanning without credentials; the authorisation model
+  # behind it is covered by tests/Feature/Vault/AuthorisationTest.php, which can
+  # assert things a spider cannot infer.
+  #
+  # Findings are triaged in .zap/rules.tsv, one line each with its reason.
+  zap:
+    name: Baseline scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ env.PHP_VERSION }}
+          extensions: sodium, sqlite3, pdo_sqlite
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: |
+          composer install --prefer-dist --no-interaction --no-progress
+          npm ci --ignore-scripts
+
+      # The real bundle, because the headers under scan are built around it:
+      # the nonce has to authorise a script tag that exists, and the integrity
+      # attributes come from the manifest.
+      - name: Build assets
+        run: npm run build
+
+      - name: Serve the application
+        run: |
+          cp .env.example .env
+          php artisan key:generate
+          touch database/database.sqlite
+          php artisan migrate --force
+          php artisan serve --port=8000 &
+          timeout 60 bash -c 'until curl -sf http://127.0.0.1:8000/up > /dev/null; do sleep 1; done'
+
+      - name: ZAP baseline
+        uses: zaproxy/action-baseline@v0.14.0
+        with:
+          target: http://127.0.0.1:8000
+          rules_file_name: .zap/rules.tsv
+          # Report warnings without failing on them; a FAIL-level rule still
+          # fails the job. Warnings that survive a look belong in the rules
+          # file with a reason, not in a job that everybody learns to ignore.
+          fail_action: false
+          allow_issue_writing: false

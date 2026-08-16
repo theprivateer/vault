@@ -18,7 +18,7 @@
  * rejected submission therefore changes nothing at all, rather than leaving this
  * tab holding keys the server has never seen.
  */
-import { Head, Link, router } from '@inertiajs/vue3';
+import { Link, router } from '@inertiajs/vue3';
 import { computed, ref } from 'vue';
 
 import IdentityFingerprint from '@/components/IdentityFingerprint.vue';
@@ -32,6 +32,7 @@ import { describeError } from '@/lib/errors';
 import { loadIdentity } from '@/lib/items';
 import { useShared } from '@/lib/page';
 import { useSession } from '@/stores/session';
+import { useDocumentTitle } from '@/lib/title';
 
 interface RotatableMembership {
     uuid: string;
@@ -155,12 +156,12 @@ async function rotate(): Promise<void> {
         busy.value = false;
     }
 }
+
+useDocumentTitle('Identity keys');
 </script>
 
 <template>
     <AppLayout>
-        <Head title="Identity keys" />
-
         <Link href="/vaults" class="text-2xs text-muted hover:text-ink">&larr; all vaults</Link>
 
         <h1 class="mt-4 text-base font-medium">your identity keys</h1>

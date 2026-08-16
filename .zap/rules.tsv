@@ -1,0 +1,32 @@
+# ZAP baseline triage (Phase 11, task 9).
+#
+# One line per rule ZAP raises that this application will not act on, with the
+# reason. IGNORE means "we looked at this and it does not apply here"; anything
+# absent from this file is reported and has to be triaged before it can be
+# added, which is the point of keeping the file short.
+#
+# Format: <rule id>	<WARN|IGNORE|FAIL>	<comment>
+# Reference: https://www.zaproxy.org/docs/docker/baseline-scan/
+
+# 10015 — no Cache-Control on some responses. Laravel sets `no-cache` on
+# anything session-bearing; the pages ZAP reaches unauthenticated are a shell
+# with no secret in it. The bytes worth caching are the hashed asset filenames,
+# which are immutable by construction.
+10015	IGNORE	Static asset responses are content-hashed and hold no user data.
+
+# 10027 — information disclosure in a suspicious comment. The bundle carries
+# the word "password" in field labels and in the strength meter's wordlist.
+10027	IGNORE	Matches UI copy in the bundle, not a leaked implementation detail.
+
+# 10109 — modern web application. An informational alert saying the crawler
+# found little to crawl, which is what a client-rendered SPA looks like.
+10109	IGNORE	Informational: Inertia renders client-side, so there is nothing to spider.
+
+# 10202 — absent anti-CSRF tokens on forms. There are no HTML forms: every
+# write is an XHR carrying the X-XSRF-TOKEN header that Laravel's middleware
+# checks, which ZAP's form scanner cannot see.
+10202	IGNORE	CSRF is enforced on the XHR header, not on a hidden form field.
+
+# 90005 — Sec-Fetch metadata not enforced server-side. The controls that do
+# this job here are `frame-ancestors 'none'`, SameSite cookies and COOP/COEP.
+90005	IGNORE	Covered by frame-ancestors, SameSite and cross-origin isolation.

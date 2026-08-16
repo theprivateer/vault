@@ -11,19 +11,20 @@
  * unlocked. That is deliberate: the moment you most want to read an audit log is
  * the moment you are least sure the password is still yours.
  */
-import { Head, Link } from '@inertiajs/vue3';
+import { Link } from '@inertiajs/vue3';
 
 import ActivityFeed, { type ActivityEvent } from '@/components/ActivityFeed.vue';
 import NoticePanel from '@/components/NoticePanel.vue';
 import AppLayout from '@/layouts/AppLayout.vue';
+import { useDocumentTitle } from '@/lib/title';
 
 defineProps<{ vault: { uuid: string }; events: ActivityEvent[] }>();
+
+useDocumentTitle('Vault activity');
 </script>
 
 <template>
     <AppLayout>
-        <Head title="Vault activity" />
-
         <Link :href="`/vaults/${vault.uuid}`" class="text-2xs text-muted hover:text-ink">
             &larr; back to vault
         </Link>

@@ -40,6 +40,33 @@ it('locks down the directives that make XSS exploitable', function (string $dire
 ]);
 
 /**
+ * Trusted Types (Phase 11, task 1).
+ *
+ * These two directives are the ones that survive a bug in our own code: with
+ * them set, the sinks an XSS payload has to reach — innerHTML, script.text,
+ * eval, the Function constructor — throw rather than execute.
+ *
+ * Asserted as an exact value rather than a "contains", because the failure mode
+ * is a widening. `trusted-types vue default` would keep every one of these
+ * assertions true if they were written loosely, and would also switch the
+ * protection off: a default policy is consulted for exactly the assignments
+ * that are supposed to fail.
+ */
+it('enforces trusted types with no default policy', function () {
+    $directives = cspDirectives($this->get('/login'));
+
+    expect($directives)->toHaveKey('require-trusted-types-for')
+        ->and($directives['require-trusted-types-for'])->toBe("'script'")
+        // Vue's runtime registers a policy under this name for its own two
+        // sinks. Nothing in resources/js registers one at all.
+        ->and($directives['trusted-types'])->toBe('vue');
+});
+
+it('does not allow a policy to be created twice or by default', function (string $forbidden) {
+    expect(cspDirectives($this->get('/login'))['trusted-types'])->not->toContain($forbidden);
+})->with(['default', "'allow-duplicates'", '*']);
+
+/**
  * `child-src` is not redundant beside `worker-src`, and removing it breaks
  * Safari completely.
  *
@@ -73,6 +100,90 @@ it('issues a nonce that matches the one on the rendered script tag', function ()
     expect($response->getContent())->toContain('nonce="'.cspNonce($response).'"');
 });
 
+/**
+ * Subresource integrity (Phase 11, task 2).
+ *
+ * Asserted on the rendered page rather than on the manifest, because the
+ * manifest having the key and the tag carrying the attribute are two different
+ * facts and only the second one reaches a browser.
+ */
+/**
+ * The build manifest, narrowed to the two fields these assertions care about.
+ *
+ * The narrowing throws rather than skipping, because a chunk with no file or no
+ * integrity key is the exact failure being looked for, and a loop that quietly
+ * ignored it would report success over an unhashed bundle.
+ *
+ * @return array<string, array{file: string, integrity: string}>
+ */
+function builtManifest(): array
+{
+    $decoded = json_decode((string) file_get_contents(public_path('build/manifest.json')), true);
+
+    $manifest = [];
+
+    foreach (is_array($decoded) ? $decoded : [] as $name => $chunk) {
+        $file = is_array($chunk) ? ($chunk['file'] ?? null) : null;
+        $integrity = is_array($chunk) ? ($chunk['integrity'] ?? null) : null;
+
+        if (! is_string($file) || ! is_string($integrity)) {
+            throw new InvalidArgumentException("Manifest chunk [{$name}] has no file or no integrity hash.");
+        }
+
+        $manifest[(string) $name] = ['file' => $file, 'integrity' => $integrity];
+    }
+
+    return $manifest;
+}
+
+describe('subresource integrity', function () {
+    it('puts a hash on every script and stylesheet it renders', function () {
+        $content = $this->get('/login')->getContent();
+
+        preg_match_all('/<(script|link)\b[^>]*>/', (string) $content, $matches);
+
+        $tags = collect($matches[0])
+            // The Inertia head slot renders a title, which carries no file.
+            ->filter(fn (string $tag): bool => str_contains($tag, 'src=') || str_contains($tag, 'href='))
+            ->filter(fn (string $tag): bool => str_contains($tag, '/build/'));
+
+        expect($tags)->not->toBeEmpty();
+
+        $tags->each(fn (string $tag) => expect($tag)->toContain('integrity="sha384-'));
+    });
+
+    /*
+     | The hash has to describe the bytes on disk. A plugin that wrote a
+     | plausible-looking constant, or hashed rollup's in-memory output before
+     | something else rewrote the file, would satisfy every assertion above and
+     | none of the ones a browser makes.
+     */
+    it('publishes a hash that matches the file it names', function () {
+        foreach (builtManifest() as $name => $chunk) {
+            $file = public_path('build/'.$chunk['file']);
+            $raw = hash_file('sha384', $file, true);
+
+            if ($raw === false) {
+                throw new RuntimeException("Manifest chunk [{$name}] names a file that cannot be read.");
+            }
+
+            expect($chunk['integrity'])->toBe('sha384-'.base64_encode($raw));
+        }
+    });
+
+    /*
+     | The crypto Worker is the one script that matters most here and the one
+     | script that cannot carry an integrity attribute: it is loaded by the
+     | Worker constructor, which has no integrity option in any browser. Named
+     | rather than left as an unexplained gap in the coverage above.
+     */
+    it('cannot cover the crypto worker, which is loaded without a tag', function () {
+        expect(file_exists(public_path('build/crypto.worker.js')))->toBeTrue()
+            ->and((string) file_get_contents(public_path('build/manifest.json')))
+            ->not->toContain('crypto.worker.js');
+    });
+});
+
 it('sets the remaining security headers', function (string $header, string $expected) {
     $this->get('/login')->assertHeader($header, $expected);
 })->with([
@@ -81,6 +192,8 @@ it('sets the remaining security headers', function (string $header, string $expe
     ['Referrer-Policy', 'no-referrer'],
     ['Cross-Origin-Opener-Policy', 'same-origin'],
     ['Cross-Origin-Resource-Policy', 'same-origin'],
+    // Every subresource here is our own, so isolation costs nothing.
+    ['Cross-Origin-Embedder-Policy', 'require-corp'],
 ]);
 
 it('denies powerful browser features by default', function (string $feature) {

@@ -17,7 +17,7 @@
  * a half-finished pass leaves nothing to repair. Closing the tab midway is fine;
  * come back and run the rest.
  */
-import { Head, Link } from '@inertiajs/vue3';
+import { Link } from '@inertiajs/vue3';
 import { computed, ref, watch } from 'vue';
 
 import NoticePanel from '@/components/NoticePanel.vue';
@@ -36,6 +36,7 @@ import {
 } from '@/lib/reseal';
 import { useSession } from '@/stores/session';
 import { useVaultContents } from '@/stores/vault';
+import { useDocumentTitle } from '@/lib/title';
 
 const props = defineProps<{
     vault: VaultRecord;
@@ -151,12 +152,12 @@ async function reseal(): Promise<void> {
         running.value = false;
     }
 }
+
+useDocumentTitle('Re-seal vault');
 </script>
 
 <template>
     <AppLayout>
-        <Head title="Re-seal vault" />
-
         <Link :href="`/vaults/${vault.uuid}`" class="text-2xs text-muted hover:text-ink">
             &larr; back to vault
         </Link>

@@ -19,7 +19,7 @@
  * wipes when you move between them; this page spans vaults, and routing it
  * through the store would empty whatever the user had open.
  */
-import { Head, Link, router } from '@inertiajs/vue3';
+import { Link, router } from '@inertiajs/vue3';
 import { computed, ref, watch } from 'vue';
 
 import NoticePanel from '@/components/NoticePanel.vue';
@@ -29,6 +29,7 @@ import { openVaultKey } from '@/lib/items';
 import type { SecretPayload, SecretRecord, VaultRecord } from '@/lib/items';
 import type { ShareLinkRecord } from '@/lib/sharelink';
 import { useSession } from '@/stores/session';
+import { useDocumentTitle } from '@/lib/title';
 
 const props = defineProps<{
     links: ShareLinkRecord[];
@@ -147,12 +148,12 @@ function revoke(uuid: string): void {
         },
     });
 }
+
+useDocumentTitle('Your links');
 </script>
 
 <template>
     <AppLayout>
-        <Head title="Your links" />
-
         <h1 class="text-base font-medium">your links</h1>
 
         <NoticePanel heading="a link is a credential, wherever you sent it" class="mt-4">

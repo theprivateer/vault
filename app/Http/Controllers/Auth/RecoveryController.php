@@ -8,6 +8,7 @@ use App\Models\User;
 use App\Models\UserKeyWrap;
 use App\Rules\Base64Bytes;
 use App\Support\AuditLog;
+use App\Support\DecoyHash;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Config;
@@ -88,12 +89,24 @@ class RecoveryController extends Controller
         $wrap = $this->recoveryWrapFor($this->normalisedEmail($request));
         $user = $wrap?->user;
 
-        // One generic failure whether the account is unknown, has no recovery
-        // wrapping, or the code is simply wrong.
-        $verified = $wrap instanceof UserKeyWrap
-            && $user instanceof User
-            && $wrap->verifier_hash !== null
-            && Hash::check($request->string('recovery_auth_key')->toString(), $wrap->verifier_hash);
+        /*
+         | One generic failure whether the account is unknown, has no recovery
+         | wrapping, or the code is simply wrong — and one Hash::check on every
+         | one of those paths.
+         |
+         | The `&&` chain used to short-circuit before the hash whenever there
+         | was no wrapping to check, so an address nobody has returned in about
+         | a millisecond while a real one spent a quarter of a second. That made
+         | this endpoint a cleaner account oracle than the login form it sits
+         | beside, which is the enumeration SR6 forbids. Found by the timing
+         | work in docs/07-penetration-test.md.
+         */
+        $decoy = DecoyHash::forVerification();
+
+        $verified = Hash::check(
+            $request->string('recovery_auth_key')->toString(),
+            $wrap instanceof UserKeyWrap ? ($wrap->verifier_hash ?? $decoy) : $decoy,
+        ) && $wrap instanceof UserKeyWrap && $user instanceof User;
 
         if (! $verified || ! $user instanceof User) {
             throw ValidationException::withMessages([

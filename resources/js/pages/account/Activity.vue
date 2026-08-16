@@ -13,19 +13,19 @@
  * quietly shortened itself when access changed would be the wrong shape of
  * honest.
  */
-import { Head } from '@inertiajs/vue3';
 
 import ActivityFeed, { type ActivityEvent } from '@/components/ActivityFeed.vue';
 import NoticePanel from '@/components/NoticePanel.vue';
 import AppLayout from '@/layouts/AppLayout.vue';
+import { useDocumentTitle } from '@/lib/title';
 
 defineProps<{ events: ActivityEvent[] }>();
+
+useDocumentTitle('Your activity');
 </script>
 
 <template>
     <AppLayout>
-        <Head title="Your activity" />
-
         <h1 class="text-base font-medium">your activity</h1>
 
         <NoticePanel heading="read this for the lines you do not recognise" class="mt-4">

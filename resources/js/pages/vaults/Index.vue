@@ -6,7 +6,7 @@
  * it was rendered. The server sent a list of UUIDs, timestamps and opaque
  * blobs, and has no idea what any of them are called.
  */
-import { Head, Link, router } from '@inertiajs/vue3';
+import { Link, router } from '@inertiajs/vue3';
 import { ref, watch } from 'vue';
 
 import NoticePanel from '@/components/NoticePanel.vue';
@@ -17,6 +17,7 @@ import { sealNewVault, type VaultPayload, type VaultRecord } from '@/lib/items';
 import { useShared } from '@/lib/page';
 import { uuid7 } from '@/lib/uuid';
 import { useSession } from '@/stores/session';
+import { useDocumentTitle } from '@/lib/title';
 
 const props = defineProps<{ vaults: VaultRecord[] }>();
 
@@ -88,12 +89,12 @@ async function create(): Promise<void> {
         createFailure.value = error instanceof Error ? error.message : 'The vault could not be encrypted.';
     }
 }
+
+useDocumentTitle('Vaults');
 </script>
 
 <template>
     <AppLayout>
-        <Head title="Vaults" />
-
         <div class="flex items-baseline justify-between gap-4">
             <div>
                 <h1 class="text-base font-medium">Your vaults</h1>

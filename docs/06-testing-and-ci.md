@@ -224,18 +224,32 @@ generator landing near 61. The bug it exists to catch — `random % 62`, which f
 characters by 25% because 256 is not a multiple of 62 — produces a value above 800. The threshold
 sits in a very wide gap, which is what makes it a test rather than a coin flip.
 
-### 4. Key material storage (SR7) — outstanding, Phase 11
+### 4. Key material storage (SR7) — Phase 11
 
-After unlock, assert `localStorage`, `sessionStorage`, IndexedDB and all cookies are free of key
-material. This is a property that degrades by accident — someone adds "remember this vault" and
-stores the wrong thing — which is exactly why it wants a test rather than a convention.
+*Two tests in `resources/js/security.test.ts`, neither of them a browser.*
 
-**It does not have one yet, and saying otherwise would be the wrong kind of comfort.** What holds
-today is stronger than a convention and weaker than a test: no code in `resources/js` calls any of
-those storage APIs at all, so there is nothing to leak through. But "nobody has written the call
-yet" is a fact about the present, and the failure this test exists to catch is a future commit. It
-needs the browser context that the Phase 11 E2E suite brings, and it is the first thing that suite
-should assert.
+`localStorage`, `sessionStorage`, IndexedDB and cookies must never hold key material. This is a
+property that degrades by accident — somebody adds "remember this vault" and stores the wrong
+thing — which is exactly why it wants a test rather than a convention. Until Phase 11 it had one:
+no code in `resources/js` called any of those APIs at all, which is stronger than a convention and
+weaker than a test, because "nobody has written the call yet" is a fact about the present and the
+failure this exists to catch is a future commit.
+
+It is now checked twice, and the two catch different things.
+
+**A sweep of the source**, with comments stripped first — the same lesson `NoServerDecryptionTest`
+learned on the server, since several files here discuss `innerHTML` and `localStorage` at length
+precisely because they are the ones that removed them. It catches the call that no test ever
+reaches but that ships anyway. The one permitted match is asserted rather than excluded: `http.ts`
+reads `document.cookie` for the XSRF token, and naming it keeps the exemption visible.
+
+**A run of the real crypto client against traps** installed on all four APIs, driving register →
+generate → seal → open and asserting the plaintext survives, so a run that quietly did nothing
+cannot pass by writing nothing. It catches what a regular expression cannot see: a write through a
+dependency, or through a property name assembled at runtime.
+
+**Neither is a page.** They assert about the source and about the client, under Node. The honest
+form is the end-to-end suite below, and this is not it.
 
 ## Backend — Pest 5
 
@@ -343,9 +357,14 @@ laptop and not for a phone. Phone numbers need a real device.
 
 ## End-to-end — Playwright (Phase 11, not yet built)
 
-Everything in this section is planned rather than running. It is listed here because several
-requirements in [02](02-threat-model.md#security-requirements) have nowhere else to be verified —
-SR7 in particular — and a plan that names them is what stops them being quietly dropped.
+Everything in this section is planned rather than running, and it did not get built in Phase 11.
+What that phase did instead was give SR7 a test that is not a browser (test 4 above) and enforce
+Trusted Types, which is a control that *only* fails in a browser — Node has no Trusted Types, so
+the suite catches a bad sink by reading the source rather than by running it.
+
+Both of those make this suite less urgent and no less necessary. It is listed here because several
+requirements in [02](02-threat-model.md#security-requirements) have nowhere else to be verified
+properly, and a plan that names them is what stops them being quietly dropped.
 
 - Register → recovery kit → logout → login → unlock → create → read → lock.
 - Two-user sharing with fingerprint verification.
@@ -359,7 +378,7 @@ SR7 in particular — and a plan that names them is what stops them being quietl
 
 ## CI gates
 
-Every gate listed as running blocks merge, across three jobs in `.github/workflows/ci.yml`.
+Every gate listed as running blocks merge, across four jobs in `.github/workflows/ci.yml`.
 
 | Gate | Tool | Status |
 | --- | --- | --- |
@@ -368,15 +387,18 @@ Every gate listed as running blocks merge, across three jobs in `.github/workflo
 | PHP tests + coverage | `php artisan test --coverage` | running |
 | **Leak canary** | Pest — currently inside the backend job rather than its own | running |
 | **No decrypt in `app/`** | `NoServerDecryptionTest` (SR2), run again as its own job | running, in the security job |
-| Headers | `SecurityHeadersTest`, asserted against real Vite output (SR10) | running, inside the PHP suite |
+| Headers | `SecurityHeadersTest`, asserted against real Vite output (SR10), including Trusted Types and the integrity hashes | running, inside the PHP suite |
+| **Storage and DOM sinks** | `security.test.ts` (SR7) — a source sweep and a trap harness | running, inside the Vitest suite |
+| **Timing parity** | `Auth/TimingTest.php` (SR6) — hash-operation counts, not a clock | running, inside the PHP suite |
+| **Rate limits** | `RateLimitTest.php` — sweeps the route table for anything unlimited | running, inside the PHP suite |
 | TS types | `vue-tsc --noEmit` | running |
 | JS lint | ESLint, including `no-restricted-imports` keeping the crypto module app-free | running |
 | JS format | `prettier --check` | running |
 | JS tests | Vitest, 100% on `crypto/**` | running |
 | Dependencies | `composer audit`, `npm audit --audit-level=moderate` | running |
 | Dependabot | — | not configured |
-| E2E | Playwright | Phase 11 |
-| DAST | ZAP baseline | Phase 11 |
+| E2E | Playwright | not built |
+| DAST | ZAP baseline against a live `php artisan serve`, triaged in `.zap/rules.tsv` | running, in its own job — but never yet run against a deployment |
 
 The leak canary was specified as its own job "so a failure is unmissable". It runs inside the
 backend suite instead, which is a real if minor loss — a red backend job does not say *which*

@@ -77,11 +77,12 @@ Read in this order:
 
 ## Status
 
-Phases 0–10 of [thirteen](docs/05-implementation-plan.md) are complete: a working zero-knowledge
+Phases 0–11 of [thirteen](docs/05-implementation-plan.md) are complete: a working zero-knowledge
 vault that can be shared with other people and taken back, holds encrypted attachments, keeps a
 tamper-evident log of what happened in it, remembers what its secrets used to say, can hand a single
-credential to somebody who has no account at all, and treats key rotation as a routine operation
-rather than an emergency one.
+credential to somebody who has no account at all, treats key rotation as a routine operation rather
+than an emergency one, and has been attacked on purpose with the results
+[written down](docs/07-penetration-test.md).
 
 - **Phase 0** — Inertia + Vue + TypeScript strict, a nonce-based CSP enforced from the first
   render, static analysis at maximum, CI gating every check.
@@ -132,8 +133,20 @@ rather than an emergency one.
   from the browser, and it carries a compare-and-swap so a stale tab cannot write old plaintext back
   under a new wrapper.
 
-Next is [Phase 11](docs/05-implementation-plan.md#phase-11--hardening--verification): hardening and
-verification.
+- **Phase 11** — hardening, and a [self-directed penetration test](docs/07-penetration-test.md)
+  written up with every finding and its fix. The ones worth naming are the ones that were nobody's
+  code: a framework default had registered two endpoints serving the encrypted file store outside
+  the authorisation model and outside the audit log, and a stale dev-server marker had quietly
+  switched the entire test suite onto output nothing in production emits — the assertions kept
+  passing against tags that do not exist. The login form was answering *twice as slowly* for an
+  address that did not exist, because the decoy hash meant to conceal that was being generated on
+  every request. Trusted Types is enforced with no default policy, which meant removing every
+  `innerHTML` from the runtime rather than allowing one, and the threat model now lives in the
+  product at `/security` rather than only in this repository — because a threat model only its
+  author reads is a document for people who were already going to trust it.
+
+Next is [Phase 12](docs/05-implementation-plan.md#phase-12--operations--release): operations and
+release.
 
 ## Stack
 

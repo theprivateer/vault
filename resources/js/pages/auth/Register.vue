@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Head, router } from '@inertiajs/vue3';
+import { router } from '@inertiajs/vue3';
 import { computed, onMounted, ref } from 'vue';
 
 import NoticePanel from '@/components/NoticePanel.vue';
@@ -12,6 +12,7 @@ import { describeError } from '@/lib/errors';
 import { HttpError, postJson } from '@/lib/http';
 import { uuid7 } from '@/lib/uuid';
 import { checkCryptoWorker, markAuthenticated, useSession } from '@/stores/session';
+import { useDocumentTitle } from '@/lib/title';
 
 const props = defineProps<{
     token: string;
@@ -129,6 +130,8 @@ async function submit(): Promise<void> {
         step.value = 'details';
     }
 }
+
+useDocumentTitle('Create your account');
 </script>
 
 <template>
@@ -141,8 +144,6 @@ async function submit(): Promise<void> {
         "
         :step="step === 'kit' ? 'step 2 of 2' : 'step 1 of 2'"
     >
-        <Head title="Create your account" />
-
         <RecoveryKit
             v-if="step === 'kit'"
             :code="recoveryCode"

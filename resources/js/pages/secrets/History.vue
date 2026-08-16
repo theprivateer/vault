@@ -12,7 +12,7 @@
  * somewhere convenient, and the honest response is not to hide the fact but to
  * put the purge button next to it.
  */
-import { Head, Link, router } from '@inertiajs/vue3';
+import { Link, router } from '@inertiajs/vue3';
 import { computed, ref, watch } from 'vue';
 
 import NoticePanel from '@/components/NoticePanel.vue';
@@ -29,6 +29,7 @@ import {
 import { openItem, openVaultKey, sealItem, PAYLOAD_VERSION } from '@/lib/items';
 import type { LockboxRecord, SecretPayload, SecretRecord, VaultRecord } from '@/lib/items';
 import { useSession } from '@/stores/session';
+import { useDocumentTitle } from '@/lib/title';
 
 const props = defineProps<{
     vault: VaultRecord;
@@ -167,12 +168,12 @@ function purge(): void {
 function when(iso: string): string {
     return new Date(iso).toLocaleString();
 }
+
+useDocumentTitle('History');
 </script>
 
 <template>
     <AppLayout>
-        <Head title="History" />
-
         <Link :href="`/lockboxes/${lockbox.uuid}`" class="text-2xs text-muted hover:text-ink">
             &larr; back to lockbox
         </Link>

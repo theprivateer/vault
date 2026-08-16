@@ -25,8 +25,16 @@ defineProps<{
         </main>
 
         <footer class="border-t border-line">
-            <div class="mx-auto max-w-2xl px-6 py-4 text-2xs text-faint">
-                the server stores ciphertext only &middot; it cannot read your secrets
+            <div class="mx-auto flex max-w-2xl justify-between gap-4 px-6 py-4 text-2xs text-faint">
+                <span>the server stores ciphertext only &middot; it cannot read your secrets</span>
+                <!--
+                    Beside the reassuring sentence, not somewhere else. The
+                    claim on the left is true and incomplete, and the page on
+                    the right is where the rest of it is.
+                -->
+                <a href="/security" class="underline underline-offset-2 hover:text-muted">
+                    and what that does not cover
+                </a>
             </div>
         </footer>
     </div>

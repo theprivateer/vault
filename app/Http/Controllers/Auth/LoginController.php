@@ -7,6 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Auth\LoginRequest;
 use App\Models\User;
 use App\Support\AuditLog;
+use App\Support\DecoyHash;
 use App\Support\KdfPolicy;
 use App\Support\Totp;
 use Illuminate\Http\JsonResponse;
@@ -47,13 +48,25 @@ class LoginController extends Controller
          | wrong second factor. Anything more specific tells an attacker which
          | half of the guess was right.
          |
-         | Hash::check is run even when there is no user, against a dummy hash,
-         | so a missing account does not return measurably faster than a wrong
-         | password.
+         | Exactly one Hash::check runs on both paths — against the stored hash
+         | when there is one and against App\Support\DecoyHash when there is
+         | not — so a missing account costs what a wrong password costs.
+         |
+         | The earlier version of this line generated its decoy on the spot,
+         | which meant the missing-account path did a Hash::make *and* a
+         | Hash::check: two bcrypt rounds against the real path's one, and an
+         | unknown address that answered reliably slower than a known one.
+         | Found by the timing work in docs/07-penetration-test.md.
+         |
+         | The decoy is resolved before the branch rather than inside it, so
+         | that both paths pay for the lookup and not just the one that uses it.
          */
-        $authenticated = $user
-            ? Hash::check($request->string('auth_key')->toString(), $user->auth_key_hash)
-            : $this->burnTime($request->string('auth_key')->toString());
+        $decoy = DecoyHash::forVerification();
+
+        $authenticated = Hash::check(
+            $request->string('auth_key')->toString(),
+            $user instanceof User ? $user->auth_key_hash : $decoy,
+        ) && $user instanceof User;
 
         if (! $user || ! $authenticated || ! $this->passesSecondFactor($user, $request)) {
             RateLimiter::hit($this->ipKey($request));
@@ -143,28 +156,28 @@ class LoginController extends Controller
         return $this->consumeBackupCode($user, $submitted);
     }
 
+    /**
+     * Every unused code is checked, including the ones after a match.
+     *
+     * Returning on the first hit made the response time a function of *where*
+     * in the list the code sat, and each comparison is a full password hash —
+     * so the difference was tens of milliseconds per position, which is a
+     * readable signal. Nothing useful is learned from it, but nothing is lost
+     * by removing it either: there are ten codes at most.
+     */
     private function consumeBackupCode(User $user, string $submitted): bool
     {
+        $matched = null;
+
         foreach ($user->backupCodes()->whereNull('used_at')->get() as $code) {
             if (Hash::check($submitted, $code->code_hash)) {
-                $code->forceFill(['used_at' => now()])->save();
-
-                return true;
+                $matched = $code;
             }
         }
 
-        return false;
-    }
+        $matched?->forceFill(['used_at' => now()])->save();
 
-    /**
-     * Spends roughly the time a real verification would, so that "no such
-     * account" and "wrong password" are not distinguishable by a stopwatch.
-     */
-    private function burnTime(string $authKey): bool
-    {
-        Hash::check($authKey, Hash::make('decoy'));
-
-        return false;
+        return $matched !== null;
     }
 
     private function ensureNotThrottled(Request $request, string $email): void

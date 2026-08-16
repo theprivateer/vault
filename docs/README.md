@@ -16,6 +16,7 @@ ciphertext and wrapped keys, and never holds a key capable of decrypting them.**
 | [04 — Data Model](04-data-model.md) | Schema, what each column leaks, migration notes |
 | [05 — Implementation Plan](05-implementation-plan.md) | **The phases.** 13 phases, each with deliverables and exit criteria |
 | [06 — Testing & CI](06-testing-and-ci.md) | Test strategy, the leak canary, CI gates |
+| [07 — Penetration Test](07-penetration-test.md) | The self-directed test: every finding, its fix, and what was deliberately left |
 | [adr/](adr/) | Decision records — why a choice was made, and what was rejected |
 
 ## The one-paragraph summary
@@ -41,7 +42,7 @@ opaque to the server; search happens in the browser.
 
 ## Status
 
-**Phases 0 to 9 complete.**
+**Phases 0 to 11 complete.**
 
 - **Phase 0** — Inertia v3 + Vue 3 + TypeScript strict, a strict nonce-based CSP enforced from
   the first render, Larastan at max level, and CI gating every check.
@@ -109,4 +110,18 @@ opaque to the server; search happens in the browser.
   operation a person runs rather than a migration a job performs, because nothing on the server can
   re-seal what it cannot read.
 
-Next: [Phase 11 — hardening and verification](05-implementation-plan.md#phase-11--hardening--verification).
+- **Phase 11** — attacking the baseline Phase 0 set, and writing down what it found
+  ([07](07-penetration-test.md)). The interesting findings were the ones nobody would have gone
+  looking for: two endpoints serving the encrypted file store outside the authorisation model,
+  registered by a framework default rather than by anybody here; a login form that answered *twice
+  as slowly* for an address that did not exist, because the decoy meant to hide that was generated
+  on the spot; and a stale dev-server marker that had quietly switched the whole test suite onto
+  output nothing in production emits. Trusted Types is now enforced with no default policy, which
+  meant removing every `innerHTML` in the runtime rather than permitting one — the progress bar and
+  the failure notice became components and the page title became `document.title`. Alongside:
+  integrity hashes on the bundle, cross-origin isolation, rate limits on everything rather than on
+  the five endpoints somebody remembered, a restore verifier that names the accounts a bad backup
+  would lock out forever, and the threat model moved into the product at `/security`, where somebody
+  deciding whether to trust this will actually read it.
+
+Next: [Phase 12 — operations and release](05-implementation-plan.md#phase-12--operations--release).

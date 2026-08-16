@@ -714,6 +714,35 @@ Every requirement SR1–SR10 in [02](02-threat-model.md#security-requirements) h
 automated test. The pen-test document is complete with findings and resolutions. ZAP baseline is
 clean or every finding is triaged in writing.
 
+### Carried forward from Phase 11
+
+All eleven tasks are built, and the test is written up in
+[07 — Penetration Test](07-penetration-test.md) with ten findings, their fixes and the tests that
+now guard each one. Every requirement SR1–SR11 has a passing automated test; SR7's is a source
+sweep and a trap harness under Node rather than a browser, and the table in
+[02](02-threat-model.md#security-requirements) says so rather than claiming more.
+
+Three things are outstanding and none of them is code:
+
+- **The ZAP baseline has not run against a deployment.** The job and its triage file exist and run
+  in CI; the rules in `.zap/rules.tsv` are predictions about what a spider will make of a
+  client-rendered SPA, and they need revisiting after the first real run.
+- **Backup encryption is an operational procedure, not a feature.** The server holds no key, so
+  encrypting a dump is `pg_dump | age -r …` and belongs in the runbook that Phase 12 writes. What
+  is built is the half that can be automated: `vault:verify-backup` proves a restore is usable, and
+  names any account whose password wrapping did not come back — the failure that cannot be repaired
+  afterwards, because there is no reset.
+- **A restore rehearsal has not been performed.** A backup you have not restored is a hypothesis,
+  and the command finishes by saying that structure is all it checked: whether the ciphertext still
+  opens is answered by signing in to the restore and unlocking a real vault. That is Phase 12,
+  task 2.
+
+Two residual risks were accepted rather than fixed, with the reasoning in
+[07 § Residual risk](07-penetration-test.md#residual-risk-accepted): a timing difference that
+reveals a correct password once a second factor is enrolled — removing it would reveal which
+accounts have a second factor, which is worse for a group this size — and decrypted vault names
+reaching the browser tab through `document.title`.
+
 ---
 
 ## Phase 12 — Operations & release

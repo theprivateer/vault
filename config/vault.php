@@ -36,6 +36,23 @@ return [
     'throttle' => [
         'login_per_minute' => (int) env('VAULT_LOGIN_THROTTLE', 5),
         'kdf_params_per_minute' => (int) env('VAULT_KDF_PARAMS_THROTTLE', 20),
+
+        /*
+         | The two broad limits every route falls under (Phase 11). These are
+         | not guessing defences — nobody brute-forces a UUID at 500 requests a
+         | minute — they bound how fast a session that has already been stolen
+         | can empty a vault.
+         |
+         | Set high enough that a file upload does not trip them: a chunked
+         | attachment is one request per megabyte, so a large file is hundreds
+         | of requests in a couple of minutes, and a limit a real upload hits is
+         | a limit somebody disables.
+         */
+        'authenticated_per_minute' => (int) env('VAULT_AUTHENTICATED_THROTTLE', 500),
+
+        'address_per_minute' => (int) env('VAULT_ADDRESS_THROTTLE', 1000),
+
+        'guest_per_minute' => (int) env('VAULT_GUEST_THROTTLE', 60),
     ],
 
     /*

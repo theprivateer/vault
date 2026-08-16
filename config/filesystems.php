@@ -33,7 +33,26 @@ return [
         'local' => [
             'driver' => 'local',
             'root' => storage_path('app/private'),
-            'serve' => true,
+
+            /*
+             | Off, and it must stay off.
+             |
+             | This disk holds every encrypted file chunk in the application.
+             | `serve => true` is a framework default that registers two routes
+             | the application does not own — GET and PUT on
+             | `/storage/{path}` — which read from and write to this directory
+             | outside the vault policies, outside the membership checks and
+             | outside the audit log. They require a signed URL, so an attacker
+             | without the application key cannot use them; that is a second
+             | line, not a reason to leave the first one open. Nothing here ever
+             | generates such a URL: chunks are served by
+             | app/Http/Controllers/FileChunkController.php, which authorises
+             | every request in its own right.
+             |
+             | Found by the route sweep in tests/Feature/RateLimitTest.php,
+             | which noticed two endpoints nobody had written.
+             */
+            'serve' => false,
             'throw' => false,
             'report' => false,
         ],

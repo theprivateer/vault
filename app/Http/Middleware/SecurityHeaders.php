@@ -52,6 +52,35 @@ class SecurityHeaders
          */
         'worker-src' => "'self'",
         'child-src' => "'self'",
+
+        /*
+         | Trusted Types (Phase 11, task 1).
+         |
+         | `require-trusted-types-for` turns every DOM sink that parses a string
+         | as markup or code — innerHTML, outerHTML, script.text, eval, the
+         | Function constructor — from something that silently works into
+         | something that throws unless the value came from a named policy. It
+         | is the one control here that survives a bug in our own code: the
+         | classic XSS chain ends at a sink, and this closes the sink.
+         |
+         | Exactly one policy name is allowed, and it is not ours. Vue's
+         | runtime-dom registers a policy called `vue` at import time and routes
+         | its own two sinks through it; nothing in resources/js registers one,
+         | and `allow-duplicates` is absent, so a second attempt to create a
+         | policy under that name — the standard way injected script buys itself
+         | a sink — is refused by the browser.
+         |
+         | There is deliberately no `default` policy. A default policy is
+         | consulted for every sink assignment that did not go through a named
+         | one, which is precisely the assignments we want to fail. Adding one
+         | that returns its input, which is the usual way to make this directive
+         | "work", would leave the header in place and the protection gone.
+         |
+         | This is what forced the progress bar in resources/js/app.ts to be
+         | ours rather than Inertia's — see the note there.
+         */
+        'require-trusted-types-for' => "'script'",
+        'trusted-types' => 'vue',
     ];
 
     /**
@@ -85,6 +114,21 @@ class SecurityHeaders
             'Permissions-Policy' => $this->permissionsPolicy(),
         ];
 
+        /*
+         | Cross-origin isolation. Every subresource this application loads is
+         | its own, so `require-corp` costs nothing and closes the document to
+         | anything embedded from elsewhere — including a cross-origin document
+         | trying to hold a reference to this one.
+         |
+         | Omitted while the Vite dev server is running, because that serves
+         | modules from another origin without a CORP header and the page would
+         | not load at all. That is a development-only relaxation of the same
+         | kind as the ones in developmentOverrides().
+         */
+        if (! $this->runningViteDevServer()) {
+            $headers['Cross-Origin-Embedder-Policy'] = 'require-corp';
+        }
+
         // Browsers ignore HSTS over plaintext, and sending it there only invites
         // confusion when testing locally.
         if ($request->secure()) {
@@ -109,10 +153,20 @@ class SecurityHeaders
 
         if ($this->runningViteDevServer()) {
             $directives = [...$directives, ...$this->developmentOverrides()];
-        }
 
-        // TODO(Phase 11): add `require-trusted-types-for 'script'` and a Trusted
-        // Types policy once the surface that needs auditing exists.
+            /*
+             | Dropped rather than relaxed, because there is no relaxed value:
+             | the Vite client builds its own error overlay out of a string, and
+             | with Trusted Types enforced a build error would be replaced by a
+             | Trusted Types error about the thing that was trying to tell you
+             | about the build error.
+             |
+             | This is why the assertions in tests/Feature/SecurityHeadersTest
+             | matter more here than elsewhere — the directive that ships is one
+             | nobody exercises while writing code.
+             */
+            unset($directives['require-trusted-types-for'], $directives['trusted-types']);
+        }
 
         return collect($directives)
             ->map(fn (string $value, string $directive): string => "{$directive} {$value}")

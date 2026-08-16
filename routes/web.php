@@ -46,12 +46,26 @@ Route::redirect('/', '/vaults')->name('home');
  | go — 32 random bytes make that hopeless, but a rate limit turns hopeless into
  | not worth attempting.
  */
-Route::get('/s', [ShareLinkController::class, 'show'])->name('share.show');
+/*
+ | The threat model, in the product rather than only in docs/ (Phase 11, D10).
+ |
+ | Outside both `auth` and `guest` on purpose. Somebody deciding whether to
+ | trust this thing has not signed in yet, and somebody who has just read the
+ | word "unrecoverable" on the recovery-kit page should not have to sign out to
+ | find out what else is true.
+ */
+Route::get('/security', fn () => Inertia::render('Security'))
+    ->middleware('throttle:guest')
+    ->name('security');
+
+Route::get('/s', [ShareLinkController::class, 'show'])
+    ->middleware('throttle:guest')
+    ->name('share.show');
 Route::post('/s/reveal', [ShareLinkController::class, 'reveal'])
     ->middleware('throttle:20,1')
     ->name('share.reveal');
 
-Route::middleware('guest')->group(function (): void {
+Route::middleware(['guest', 'throttle:guest'])->group(function (): void {
     // Registration is invite-only (D11). There is no open sign-up route.
     Route::get('/register/{token}', [RegisterController::class, 'create'])->name('register');
     Route::post('/register/{token}', [RegisterController::class, 'store'])
@@ -79,7 +93,13 @@ Route::middleware('guest')->group(function (): void {
         ->name('password.request');
 });
 
-Route::middleware('auth')->group(function (): void {
+/*
+ | `throttle:authenticated` covers everything below it (Phase 11, task 4). The
+ | endpoints with their own limiter keep it — a stricter one inside a looser one
+ | is the point, and the looser one is what stops a new route shipping with no
+ | limit at all because nobody thought to add one.
+ */
+Route::middleware(['auth', 'throttle:authenticated'])->group(function (): void {
     Route::post('/logout', [LoginController::class, 'destroy'])->name('logout');
 
     /*

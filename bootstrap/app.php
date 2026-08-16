@@ -21,6 +21,23 @@ return Application::configure(basePath: dirname(__DIR__))
         ], append: [
             HandleInertiaRequests::class,
         ]);
+
+        /*
+         | Only `APP_URL` and its subdomains may name this application (Phase 11,
+         | task 8). Without this, `Host:` is attacker-controlled input that
+         | reaches `route()` — so the absolute URL the login response tells the
+         | browser to navigate to is built from a header the request supplied.
+         |
+         | The exploit path is narrow, since a victim's own browser sends the
+         | real host, and it widens the moment anything caches a response or
+         | puts a generated link in an email. Cheap enough that narrow is not a
+         | reason to leave it.
+         |
+         | Off in local and under tests, which is Laravel's behaviour and the
+         | right one: `php artisan serve`, Herd and the test client all use hosts
+         | that will not match a production APP_URL.
+         */
+        $middleware->trustHosts();
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(

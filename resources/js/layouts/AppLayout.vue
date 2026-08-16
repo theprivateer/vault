@@ -101,7 +101,12 @@ function signOutNow(): void {
 
         <footer class="border-t border-line">
             <div class="mx-auto flex max-w-5xl justify-between gap-4 px-6 py-4 text-2xs text-faint">
-                <span>the server stores ciphertext only &middot; it cannot read your secrets</span>
+                <span>
+                    the server stores ciphertext only &middot; it cannot read your secrets &middot;
+                    <Link href="/security" class="underline underline-offset-2 hover:text-muted">
+                        and what that does not cover
+                    </Link>
+                </span>
                 <span v-if="state.lockReason === 'idle'">locked after inactivity</span>
             </div>
         </footer>

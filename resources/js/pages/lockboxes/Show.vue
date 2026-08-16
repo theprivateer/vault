@@ -10,7 +10,7 @@
  * page encrypted it a moment ago — so there is nothing to guess at, and the
  * only honest thing to do with a failure is put the row back exactly as it was.
  */
-import { Head, Link, router } from '@inertiajs/vue3';
+import { Link, router } from '@inertiajs/vue3';
 import { computed, ref, watch } from 'vue';
 
 import FileAttachments from '@/components/FileAttachments.vue';
@@ -38,6 +38,7 @@ import { search, buildIndex } from '@/lib/search';
 import { uuid7 } from '@/lib/uuid';
 import { useSession } from '@/stores/session';
 import { useVaultContents, type OpenedSecret } from '@/stores/vault';
+import { useDocumentTitle } from '@/lib/title';
 
 const props = defineProps<{
     vault: VaultRecord;
@@ -385,12 +386,12 @@ function remove(uuid: string): void {
         },
     });
 }
+
+useDocumentTitle(() => openedLockbox.value?.payload?.name ?? 'Lockbox');
 </script>
 
 <template>
     <AppLayout>
-        <Head :title="openedLockbox?.payload?.name ?? 'Lockbox'" />
-
         <Link :href="`/vaults/${vault.uuid}`" class="text-2xs text-muted hover:text-ink">
             &larr; back to vault
         </Link>

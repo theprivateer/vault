@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Head, Link, router } from '@inertiajs/vue3';
+import { Link, router } from '@inertiajs/vue3';
 import { computed, ref } from 'vue';
 
 import NoticePanel from '@/components/NoticePanel.vue';
@@ -12,6 +12,7 @@ import { fromBase64, toBase64 } from '@/lib/bytes';
 import { describeError } from '@/lib/errors';
 import { HttpError, postJson } from '@/lib/http';
 import { markAuthenticated, useSession } from '@/stores/session';
+import { useDocumentTitle } from '@/lib/title';
 
 const props = defineProps<{ kdfParams: KdfParams }>();
 
@@ -123,6 +124,8 @@ async function setNewPassword(): Promise<void> {
         busy.value = false;
     }
 }
+
+useDocumentTitle('Recover your account');
 </script>
 
 <template>
@@ -134,8 +137,6 @@ async function setNewPassword(): Promise<void> {
                 : undefined
         "
     >
-        <Head title="Recover your account" />
-
         <RecoveryKit
             v-if="step === 'kit'"
             :code="newRecoveryCode"

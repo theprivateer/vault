@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Head, Link, router } from '@inertiajs/vue3';
+import { Link, router } from '@inertiajs/vue3';
 import { computed, ref } from 'vue';
 
 import NoticePanel from '@/components/NoticePanel.vue';
@@ -11,6 +11,7 @@ import { fromBase64, toBase64 } from '@/lib/bytes';
 import { describeError } from '@/lib/errors';
 import { HttpError, postJson } from '@/lib/http';
 import { markAuthenticated, useSession } from '@/stores/session';
+import { useDocumentTitle } from '@/lib/title';
 
 const email = ref('');
 const password = ref('');
@@ -142,12 +143,12 @@ async function upgradeKdf(currentAuthKey: Uint8Array, params: KdfParams, aad: Aa
         upgrading.value = false;
     }
 }
+
+useDocumentTitle('Sign in');
 </script>
 
 <template>
     <AuthLayout title="Sign in" subtitle="Your password is stretched here and never sent.">
-        <Head title="Sign in" />
-
         <form class="max-w-sm space-y-6" @submit.prevent="submit">
             <TextField v-model="email" label="email" type="email" autocomplete="username" autofocus />
 

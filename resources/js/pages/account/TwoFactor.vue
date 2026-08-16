@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { Head, Link, router } from '@inertiajs/vue3';
+import { Link, router } from '@inertiajs/vue3';
 import { ref } from 'vue';
 
 import NoticePanel from '@/components/NoticePanel.vue';
 import TextField from '@/components/TextField.vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { HttpError, postJson } from '@/lib/http';
+import { useDocumentTitle } from '@/lib/title';
 
 defineProps<{
     enabled: boolean;
@@ -49,13 +50,13 @@ async function disable(): Promise<void> {
         busy.value = false;
     }
 }
+
+useDocumentTitle('Two-factor authentication');
 </script>
 
 <template>
     <!-- Enrolment is an authentication concern; it needs no key material. -->
     <AppLayout :require-unlock="false">
-        <Head title="Two-factor authentication" />
-
         <div class="max-w-xl space-y-8">
             <div>
                 <h1 class="text-base font-medium">Two-factor authentication</h1>

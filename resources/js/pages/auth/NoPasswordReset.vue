@@ -1,14 +1,15 @@
 <script setup lang="ts">
-import { Head, Link } from '@inertiajs/vue3';
+import { Link } from '@inertiajs/vue3';
 
 import NoticePanel from '@/components/NoticePanel.vue';
 import AuthLayout from '@/layouts/AuthLayout.vue';
+import { useDocumentTitle } from '@/lib/title';
+
+useDocumentTitle('No password reset');
 </script>
 
 <template>
     <AuthLayout title="There is no password reset" subtitle="This is a design decision, not an omission.">
-        <Head title="No password reset" />
-
         <div class="max-w-prose space-y-6 text-sm">
             <p>
                 Your vault is encrypted with a key derived from your master password, in your browser. The

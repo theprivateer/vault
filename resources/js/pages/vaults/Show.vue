@@ -8,7 +8,7 @@
  * rather than assumed — see the scale ceiling in docs/06-testing-and-ci.md —
  * and it is shown to the user as progress rather than hidden behind a spinner.
  */
-import { Head, Link, router, usePage } from '@inertiajs/vue3';
+import { Link, router, usePage } from '@inertiajs/vue3';
 import { computed, ref, watch } from 'vue';
 
 import NoticePanel from '@/components/NoticePanel.vue';
@@ -26,6 +26,7 @@ import { uuid7 } from '@/lib/uuid';
 import { usePins } from '@/stores/pins';
 import { useSession } from '@/stores/session';
 import { useVaultContents } from '@/stores/vault';
+import { useDocumentTitle } from '@/lib/title';
 
 /** The public halves of the signed-in user's own identity. */
 interface OwnIdentity {
@@ -201,12 +202,12 @@ function destroy(): void {
         },
     });
 }
+
+useDocumentTitle(() => contents.value.vault?.payload?.name ?? 'Vault');
 </script>
 
 <template>
     <AppLayout>
-        <Head :title="contents.vault?.payload?.name ?? 'Vault'" />
-
         <div class="flex items-baseline justify-between gap-4">
             <Link href="/vaults" class="text-2xs text-muted hover:text-ink">&larr; all vaults</Link>
 

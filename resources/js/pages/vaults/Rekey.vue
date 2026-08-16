@@ -15,7 +15,7 @@
  * before re-keying is not belt and braces; without it, rotation is a delivery
  * mechanism.
  */
-import { Head, Link, router } from '@inertiajs/vue3';
+import { Link, router } from '@inertiajs/vue3';
 import { computed, ref } from 'vue';
 
 import IdentityFingerprint from '@/components/IdentityFingerprint.vue';
@@ -29,6 +29,7 @@ import { checkIdentity, type MembershipRecord, type PublicIdentity } from '@/lib
 import { useShared } from '@/lib/page';
 import { usePins } from '@/stores/pins';
 import { useSession } from '@/stores/session';
+import { useDocumentTitle } from '@/lib/title';
 
 interface RekeyItem {
     uuid: string;
@@ -236,12 +237,12 @@ async function rekey(): Promise<void> {
         void client.forget(newKey);
     }
 }
+
+useDocumentTitle('Re-key vault');
 </script>
 
 <template>
     <AppLayout>
-        <Head title="Re-key vault" />
-
         <Link :href="`/vaults/${vault.uuid}`" class="text-2xs text-muted hover:text-ink">
             &larr; back to vault
         </Link>

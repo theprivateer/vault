@@ -177,10 +177,14 @@ Stated so they can be challenged:
 
 ## Security requirements
 
-Testable statements. Phase 11 closes the gaps below and Phase 12 verifies each one against a
-running system. **Where a requirement has no automated test yet, it says so** — a requirement
-listed as verified when it is not is worse than one listed as outstanding, because it reads as
-evidence.
+Testable statements. Every one of SR1–SR11 now has a passing automated test; Phase 12 verifies
+them against a deployed system rather than a test one. **Where the test is weaker than the
+requirement, it says so** — a requirement listed as verified when it is only mostly verified is
+worse than one listed as outstanding, because it reads as evidence.
+
+The self-directed test that closed the gaps, with each finding and its fix, is
+[07 — Penetration Test](07-penetration-test.md). Its residual-risk section is the honest companion
+to this table.
 
 | # | Requirement | Verified by |
 | --- | --- | --- |
@@ -189,9 +193,9 @@ evidence.
 | SR3 | Tampering with any stored ciphertext produces a visible, specific error — never silent corruption or a null | `crypto/envelope.test.ts` — every single-bit mutation of a short envelope throws |
 | SR4 | A ciphertext cannot be moved between records or fields without detection | `crypto/aad.test.ts`, `crypto/keys.test.ts`, and `lib/history.test.ts` for the case history creates — an archived version offered as the live payload |
 | SR5 | Every request is authorised against vault membership and role, independently of client claims | `tests/Feature/Vault/AuthorisationTest.php` (IDOR) and `RoleMatrixTest.php` (role × action) |
-| SR6 | Auth endpoints are rate limited per-IP and per-account, and do not reveal whether an account exists | `tests/Feature/Auth/LoginTest.php`, `RecoveryTest.php` — including the pre-auth salt endpoints |
-| SR7 | Key material never reaches `localStorage`, `sessionStorage`, IndexedDB or a cookie | **Not yet automated.** Holds by construction — nothing in `resources/js` calls any of those APIs — but construction is not a test. Needs the Phase 11 E2E suite |
+| SR6 | Auth endpoints are rate limited per-IP and per-account, and do not reveal whether an account exists | `tests/Feature/Auth/LoginTest.php`, `RecoveryTest.php` — including the pre-auth salt endpoints. `TimingTest.php` covers the half a response body cannot show: every pre-auth path performs the same number of password hashes, so an address that exists cannot be told from one that does not by a stopwatch. `RateLimitTest.php` sweeps the route table for anything unlimited |
+| SR7 | Key material never reaches `localStorage`, `sessionStorage`, IndexedDB or a cookie | `resources/js/security.test.ts` — a sweep of every source file with comments stripped, and a full derive-seal-open run against traps installed on all four APIs. **Not a browser**, so it asserts about the source and about the crypto client rather than about a real page; an end-to-end suite is still the honest form and does not exist yet |
 | SR8 | The audit log detects any insertion, deletion, reordering or modification of entries | `tests/Feature/Vault/AuditChainTest.php` — one deliberate-corruption case per kind, plus truncation from the end and a rewritten head, which the chain alone cannot catch. `AuditSignatureTest.php` covers a fabricated entry whose hashes were recomputed |
 | SR9 | Revoking a member rotates the Vault Key and re-wraps all item keys | `tests/Feature/Vault/RekeyTest.php`, `SharingTest.php` |
-| SR10 | The application sets a strict CSP with no `unsafe-inline` or `unsafe-eval` in `script-src` | `tests/Feature/SecurityHeadersTest.php`, asserted against real Vite output |
+| SR10 | The application sets a strict CSP with no `unsafe-inline` or `unsafe-eval` in `script-src` | `tests/Feature/SecurityHeadersTest.php`, asserted against real Vite output — which it had quietly stopped doing until Phase 11 found a stale `public/hot` switching the whole suite onto the dev-server path ([07 § F8](07-penetration-test.md#f8--the-test-suite-was-asserting-against-development-output)). Trusted Types is enforced with no default policy, and the sinks it guards are swept for in `resources/js/security.test.ts` |
 | SR11 | A one-time share link opens the number of times it was allowed to and no more, and neither its token nor its key is ever written to a database row or a log | `tests/Feature/Vault/ShareLinkTest.php` — the count is consumed inside a locked transaction, and a sweep over every table and log file looks for both halves of the credential |
