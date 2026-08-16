@@ -15,26 +15,35 @@ import { computed, ref, watch } from 'vue';
 
 import FileAttachments from '@/components/FileAttachments.vue';
 import NoticePanel from '@/components/NoticePanel.vue';
-import PasswordGenerator from '@/components/PasswordGenerator.vue';
+import SecretFieldInput from '@/components/SecretFieldInput.vue';
 import SecretRow from '@/components/SecretRow.vue';
 import ShareSecret from '@/components/ShareSecret.vue';
-import StrengthMeter from '@/components/StrengthMeter.vue';
 import TextField from '@/components/TextField.vue';
 import AppLayout from '@/layouts/AppLayout.vue';
 import { describeError } from '@/lib/errors';
 import type { FileRecord } from '@/lib/files';
 import { sealVersion } from '@/lib/history';
-import { parseOtpauth } from '@/crypto/totp';
 import {
     PAYLOAD_VERSION,
     sealItem,
     type LockboxRecord,
     type SecretPayload,
     type SecretRecord,
-    type SecretType,
     type VaultRecord,
 } from '@/lib/items';
 import { search, buildIndex } from '@/lib/search';
+import {
+    ALL_FIELD_KEYS,
+    buildPayload,
+    fieldsFor,
+    isKnownType,
+    readField,
+    searchFieldsFor,
+    SECRET_TYPES,
+    SECRET_TYPE_ORDER,
+    unmappedFields,
+    type SecretFieldKey,
+} from '@/lib/secretTypes';
 import { uuid7 } from '@/lib/uuid';
 import { useSession } from '@/stores/session';
 import { useVaultContents, type OpenedSecret } from '@/stores/vault';
@@ -63,25 +72,41 @@ const {
     removeOptimistic,
 } = useVaultContents();
 
-/** The form's shape: every optional payload field made concrete for v-model. */
-type SecretDraft = Omit<SecretPayload, 'url' | 'paranoid' | 'totp'> & {
-    url: string;
+/**
+ * The form's shape: every field made a concrete string for `v-model`.
+ *
+ * `unknown` carries anything the payload held that this build's schema has no
+ * field for — an item written by a later build, or a `card` from before cards
+ * had fields. It is not rendered, and it is written straight back on save. An
+ * editor that dropped what it could not display would turn "we cannot show this"
+ * into "this is gone", silently, on the first edit.
+ */
+type SecretDraft = Record<SecretFieldKey, string> & {
+    type: string;
+    key: string;
     paranoid: boolean;
-    totp: string;
-    linkedLockboxUuid: string;
+    unknown: Record<string, string>;
 };
 
 const editing = ref<string | null>(null);
 const sharing = ref<string | null>(null);
-const showGenerator = ref(false);
-const totpFailure = ref('');
 const draft = ref<SecretDraft>(emptyDraft());
 const writeFailure = ref('');
 const filter = ref('');
 
 const canWrite = computed(() => props.vault.membership.role !== 'viewer');
 
-const SECRET_TYPES: SecretType[] = ['password', 'note', 'key', 'card', 'lockbox'];
+/** The fields the open form shows, which change as the type picker changes. */
+const draftFields = computed(() => fieldsFor(draft.value.type));
+
+const typeDescription = computed(() =>
+    isKnownType(draft.value.type) ? SECRET_TYPES[draft.value.type].description : '',
+);
+
+/** Lockboxes this vault holds, by name, for the `lockbox` control. */
+const lockboxOptions = computed(() =>
+    props.lockboxes.map((box) => ({ uuid: box.uuid, name: names.value.get(box.uuid) ?? box.uuid })),
+);
 
 /** Names of the vault's lockboxes, so a link can be rendered by name. */
 const names = computed(
@@ -116,19 +141,7 @@ const visible = computed<OpenedSecret[]>(() => {
 
     const index = buildIndex(
         inLockbox.value.flatMap((entry) =>
-            entry.payload
-                ? [
-                      {
-                          id: entry.record.uuid,
-                          fields: {
-                              name: entry.payload.key,
-                              notes: entry.payload.notes,
-                              url: entry.payload.url ?? '',
-                              type: entry.payload.type,
-                          },
-                      },
-                  ]
-                : [],
+            entry.payload ? [{ id: entry.record.uuid, fields: searchFieldsFor(entry.payload) }] : [],
         ),
     );
 
@@ -141,17 +154,22 @@ const percent = computed(() =>
     progress.value.total === 0 ? 0 : Math.round((progress.value.done / progress.value.total) * 100),
 );
 
+/**
+ * A blank draft with every field key present and empty.
+ *
+ * All of them, not just the chosen type's, purely so that switching the type
+ * picker mid-edit never leaves a `v-model` bound to an absent key. It says
+ * nothing about what gets stored: `buildPayload` drops the empties and the ones
+ * this type does not show, which is deliberate and is explained where it
+ * happens.
+ */
 function emptyDraft(): SecretDraft {
-    return {
-        type: 'password',
-        key: '',
-        value: '',
-        notes: '',
-        url: '',
-        paranoid: false,
-        totp: '',
-        linkedLockboxUuid: '',
-    };
+    const fields = Object.fromEntries(ALL_FIELD_KEYS.map((key) => [key, ''])) as Record<
+        SecretFieldKey,
+        string
+    >;
+
+    return { ...fields, type: 'password', key: '', paranoid: false, unknown: {} };
 }
 
 /**
@@ -163,38 +181,6 @@ function emptyDraft(): SecretDraft {
  * discouraged.
  */
 const shared = computed(() => inLockbox.value.find((entry) => entry.record.uuid === sharing.value) ?? null);
-
-/**
- * Accepts either a bare base32 seed or a whole `otpauth://` URI.
- *
- * Pasting the URI is what people actually have — it is what a QR code encodes,
- * and most setup pages offer it as "can't scan?" text. Parsing it here means the
- * issuer and account travel no further than this function; only the seed is
- * kept, because the rest is somebody else's label for an account we already have
- * a name for.
- *
- * **There is no camera scanner**, and that is a decision rather than an
- * omission. `Permissions-Policy` denies `camera=()` outright, lifting it would
- * weaken a header that currently denies everything, and a QR decoder is another
- * dependency for a path that ends at the same string this field accepts.
- */
-function readTotp(value: string): string {
-    totpFailure.value = '';
-
-    const trimmed = value.trim();
-
-    if (trimmed === '' || !trimmed.toLowerCase().startsWith('otpauth:')) {
-        return trimmed;
-    }
-
-    try {
-        return parseOtpauth(trimmed).secret;
-    } catch (error) {
-        totpFailure.value = describeError(error, 'That one-time-password URI could not be read.');
-
-        return '';
-    }
-}
 
 watch(
     [() => props.vault, () => props.lockboxes, () => props.secrets, () => props.files, isUnlocked],
@@ -216,8 +202,6 @@ watch(
 function startCreate(): void {
     editing.value = 'new';
     sharing.value = null;
-    showGenerator.value = false;
-    totpFailure.value = '';
     writeFailure.value = '';
     draft.value = emptyDraft();
 }
@@ -229,14 +213,23 @@ function startEdit(entry: OpenedSecret): void {
 
     editing.value = entry.record.uuid;
     sharing.value = null;
-    showGenerator.value = false;
-    totpFailure.value = '';
     writeFailure.value = '';
+
+    const payload = entry.payload;
+    const blank = emptyDraft();
+    const known = Object.fromEntries(ALL_FIELD_KEYS.map((key) => [key, readField(payload, key)])) as Record<
+        SecretFieldKey,
+        string
+    >;
+
     draft.value = {
-        ...entry.payload,
-        url: entry.payload.url ?? '',
-        paranoid: entry.payload.paranoid ?? false,
-        totp: entry.payload.totp ?? '',
+        ...blank,
+        ...known,
+        type: payload.type,
+        key: payload.key,
+        paranoid: payload.paranoid ?? false,
+        // Carried through the edit untouched. See the note on SecretDraft.
+        unknown: Object.fromEntries(unmappedFields(payload).map((entry) => [entry.field.key, entry.value])),
         linkedLockboxUuid: entry.record.linkedLockboxUuid ?? '',
     };
 }
@@ -256,15 +249,11 @@ function startEdit(entry: OpenedSecret): void {
 async function save(): Promise<void> {
     writeFailure.value = '';
 
-    const { linkedLockboxUuid, totp, ...rest } = draft.value;
+    const { linkedLockboxUuid, unknown, paranoid, type, key, ...fields } = draft.value;
 
-    /*
-     | An empty seed is dropped rather than stored as "". A payload carrying
-     | `totp: ''` would make every row look like it has a one-time code and give
-     | the interface a blank ring to render, and the padding means the absent
-     | field costs nothing to omit.
-     */
-    const payload: SecretPayload = totp === '' ? rest : { ...rest, totp };
+    // Assembled in lib/secretTypes.ts, where its three rules can be asserted.
+    const payload = buildPayload({ type, key, fields, paranoid, unknown }) as SecretPayload;
+
     const isNew = editing.value === 'new';
     const uuid = isNew ? uuid7() : (editing.value ?? '');
     const existing = inLockbox.value.find((entry) => entry.record.uuid === uuid);
@@ -418,60 +407,31 @@ useDocumentTitle(() => openedLockbox.value?.payload?.name ?? 'Lockbox');
             <div>
                 <label class="label" for="secret-type">type</label>
                 <select id="secret-type" v-model="draft.type" class="field">
-                    <option v-for="type in SECRET_TYPES" :key="type" :value="type">{{ type }}</option>
+                    <option v-for="type in SECRET_TYPE_ORDER" :key="type" :value="type">
+                        {{ SECRET_TYPES[type].label }}
+                    </option>
                 </select>
+                <p class="mt-1.5 text-2xs text-muted">
+                    {{ typeDescription }}
+                </p>
             </div>
 
             <TextField v-model="draft.key" label="name" autofocus />
 
-            <div>
-                <TextField v-model="draft.value" label="value" />
-                <StrengthMeter :password="draft.value" class="mt-2" />
-
-                <button
-                    type="button"
-                    class="mt-2 text-2xs text-muted hover:text-ink"
-                    :aria-expanded="showGenerator"
-                    @click="showGenerator = !showGenerator"
-                >
-                    {{ showGenerator ? 'hide generator' : 'generate one' }}
-                </button>
-
-                <PasswordGenerator
-                    v-if="showGenerator"
-                    class="mt-3"
-                    @use="
-                        (value) => {
-                            draft.value = value;
-                            showGenerator = false;
-                        }
-                    "
-                />
-            </div>
-
-            <TextField v-model="draft.notes" label="notes" />
-            <TextField v-model="draft.url" label="url" />
-
-            <div>
-                <TextField
-                    :model-value="draft.totp"
-                    label="one-time password seed"
-                    placeholder="base32 seed, or paste a whole otpauth:// link"
-                    hint="Stays inside the encrypted payload, like everything else. Paste the setup link a site gives you when you cannot scan its QR code."
-                    @update:model-value="(value: string) => (draft.totp = readTotp(value))"
-                />
-                <p v-if="totpFailure" class="mt-1 text-2xs text-accent">{{ totpFailure }}</p>
-            </div>
-
-            <div>
-                <label class="label" for="secret-link">linked lockbox</label>
-                <select id="secret-link" v-model="draft.linkedLockboxUuid" class="field">
-                    <option value="">none</option>
-                    <option v-for="box in lockboxes" :key="box.uuid" :value="box.uuid">
-                        {{ names.get(box.uuid) ?? box.uuid }}
-                    </option>
-                </select>
-            </div>
+            <!--
+                The type's own fields, from lib/secretTypes.ts. Keyed by type as
+                well as by field so that switching the picker rebuilds the
+                inputs rather than reusing one across two different meanings —
+                a card's security code and a note's body must not share a
+                component instance.
+            -->
+            <SecretFieldInput
+                v-for="field in draftFields"
+                :key="`${draft.type}-${field.key}`"
+                v-model="draft[field.key]"
+                :field="field"
+                :lockboxes="lockboxOptions"
+            />
 
             <label class="flex items-center gap-2 text-2xs text-muted">
                 <input v-model="draft.paranoid" type="checkbox" />

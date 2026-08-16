@@ -12,7 +12,7 @@ Before planning or editing, find the row whose globs match the file's path and r
 | resources/js/crypto/**, resources/js/crypto/padding.ts, resources/js/crypto/grant.ts, resources/js/crypto/chunks.ts, resources/js/crypto/audit.ts, resources/js/crypto/envelope.ts, resources/js/crypto/rotation.ts | .ai/rules/crypto.md |
 | docs/**, docs/05-implementation-plan.md | .ai/rules/docs.md |
 | resources/js/** | .ai/rules/js.md |
-| resources/js/lib/**, resources/js/lib/sharing.ts, resources/js/lib/files.ts, resources/js/lib/generate.ts | .ai/rules/lib.md |
+| resources/js/lib/**, resources/js/lib/sharing.ts, resources/js/lib/files.ts, resources/js/lib/generate.ts, resources/js/lib/secretTypes.ts | .ai/rules/lib.md |
 | app/Http/Middleware/SecurityHeaders.php | .ai/rules/middleware.md |
 | database/migrations/** | .ai/rules/migrations.md |
 | app/Models/VaultMembership.php | .ai/rules/models.md |

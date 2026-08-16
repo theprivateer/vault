@@ -85,10 +85,17 @@ useDocumentTitle('How this is secured');
                 </p>
 
                 <p>
-                    Names, notes, usernames, passwords, addresses, one-time-code seeds, filenames and file
-                    contents are all encrypted, along with the kind of thing each item is. Item sizes are
-                    padded into buckets so a short password and a long one are stored at the same size; file
-                    sizes are not padded and are visible.
+                    Names, notes, usernames, passwords, card numbers, addresses, one-time-code seeds,
+                    filenames and file contents are all encrypted, along with the kind of thing each item is.
+                    Item sizes are padded into buckets so a short password and a long one are stored at the
+                    same size; file sizes are not padded and are visible.
+                </p>
+
+                <p>
+                    Because the padding is coarse, a large item is still visibly larger than a small one — so
+                    while the server cannot read what kind of thing an item is, the space it takes up is a
+                    weak hint at it. Weak is meant literally: most kinds of item share a size with several
+                    others, and anything you write in the notes field swamps the difference entirely.
                 </p>
             </section>
 

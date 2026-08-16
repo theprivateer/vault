@@ -20,6 +20,7 @@ import { vaultKeyHandle } from '@/crypto/worker/protocol';
 
 import { comparePayloads, openVersions, sealVersion, type VersionRecord } from './history';
 import { openItem, type SecretPayload } from './items';
+import { ALL_FIELD_KEYS } from './secretTypes';
 
 const VAULT_UUID = '0192f3a1-4b2c-7d3e-8f90-a1b2c3d4e5f7';
 const SECRET_UUID = '0192f3a1-4b2c-7d3e-8f90-a1b2c3d4e5fa';
@@ -213,6 +214,14 @@ describe('comparing two versions', () => {
         const fields = comparePayloads(payload(), surprise).map((field) => field.field);
 
         expect(fields).not.toContain('secretQuestion');
-        expect(fields).toEqual(['key', 'value', 'notes', 'url', 'type']);
+
+        /*
+         | Asserted as a closed set rather than as a literal list. The list grows
+         | whenever a type declares a new field, and a test pinned to a snapshot
+         | of it fails on every such change while saying nothing about the
+         | property that matters — which is that the set is closed at all, and
+         | that `secretQuestion` is outside it.
+         */
+        expect(new Set(fields)).toEqual(new Set(['key', 'type', ...ALL_FIELD_KEYS]));
     });
 });

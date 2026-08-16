@@ -46,7 +46,7 @@ export const PADDED_FROM_VERSION = 2;
  */
 const KEY_WRAP_VERSION = 1;
 
-export type SecretType = 'password' | 'note' | 'key' | 'card' | 'lockbox';
+export type { SecretType } from './secretTypes';
 
 export interface VaultPayload {
     name: string;
@@ -58,13 +58,37 @@ export interface LockboxPayload {
     description: string;
 }
 
-export interface SecretPayload {
+/*
+ | A type alias rather than an interface, deliberately.
+ |
+ | Only an alias gets an implicit index signature, which is what lets a payload
+ | be read by a `string` key — and reading by string key is exactly what the
+ | schema-driven renderers do, since the field list is data. An interface here
+ | forces a cast at every one of those call sites, and a cast is the thing that
+ | would let a genuinely wrong key through unnoticed.
+ */
+export type SecretPayload = {
     /**
      * Inside the payload, never a column: a type column would tell the server
      * which rows are SSH keys and which are notes, for free.
+     *
+     * Widened to `string` rather than `SecretType` deliberately. A payload
+     * written by a later build can name a type this one has never heard of, and
+     * that has to render as an item with unrecognised fields — not crash, and
+     * not be silently reinterpreted under some default schema, which would put a
+     * token in a field labelled "note" and mask nothing. See `isKnownType`.
      */
-    type: SecretType;
+    type: string;
     key: string;
+    /**
+     * The primary value, for the types that have exactly one.
+     *
+     * Required rather than optional even on the structured types, where it is
+     * simply empty. Two reasons: every payload this application has ever written
+     * carries it, so making it optional would be a schema change for nothing;
+     * and a uniform key set is what keeps items of one type from differing in
+     * serialised size by anything except their contents.
+     */
     value: string;
     notes: string;
     url?: string;
@@ -82,7 +106,30 @@ export interface SecretPayload {
      * security control and is not one here.
      */
     paranoid?: boolean;
-}
+
+    /*
+     | The structured types' fields, all optional and all additive.
+     |
+     | Additive is what makes this free: PAYLOAD_VERSION stays at 2, every
+     | payload written before these existed still reads, and nothing needs a
+     | migration or a reseal. Which type shows which of them is decided by
+     | lib/secretTypes.ts, never here.
+     */
+    username?: string;
+    cardholder?: string;
+    cardNumber?: string;
+    cardExpiry?: string;
+    cardCvv?: string;
+    street?: string;
+    city?: string;
+    region?: string;
+    postcode?: string;
+    country?: string;
+    host?: string;
+    port?: string;
+    expires?: string;
+    scope?: string;
+};
 
 /** The stored shape of anything with a payload. */
 export interface EncryptedItem {

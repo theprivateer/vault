@@ -118,6 +118,32 @@ The server necessarily learns:
   storing and transferring an arbitrary amount of nothing, and the cost is real where a payload's
   is not. A file's *name*, type and hash are all inside its encrypted manifest, so what leaks is
   how big something is, never what it is.
+- **A weak hint at an item's *kind*, via that same bucket** — much weaker than it first looks, and
+  measured rather than assumed. This arrived with the typed secrets in
+  [05 § Phase 13](05-implementation-plan.md). A secret's `type` has never been a column, precisely
+  so the server cannot say which rows are SSH keys and which are one-time-password seeds, and the
+  fair question is whether twelve fixed field sets put it back. Serialising a realistic item of
+  each type and bucketing it says:
+
+  | note length | how the twelve types distribute |
+  | --- | --- |
+  | empty | 128 → 7 types; 256 → 4 types; **512 → `server` alone** |
+  | 100 chars | 256 → 7 types; 512 → 5 types |
+  | 200 chars | 512 → all twelve |
+  | 400 chars | 512 → 7 types; 1024 → 5 types |
+
+  The dominant term in a payload's size is its *content*, overwhelmingly the note, not the shape
+  of its type. Only `server` is ever alone in a bucket, and only when fully populated with no note
+  at all; a hundred characters of notes puts it back among four others. `address`, despite having
+  the most fields, never occupies a bucket alone — removing it would change nothing.
+
+  **Dropping empty fields is what preserves that overlap, and it is the opposite of the intuitive
+  choice.** Writing every key of a type, empties included, would make items of one type a uniform
+  size; uniformity *tightens* each type's size range, and tight ranges that differ from each other
+  are exactly what makes types separable. Measured: dropping empties leaves eleven of twelve types
+  able to produce a 128-byte item, and writing every key leaves eight. Closing the residue
+  properly would mean padding every payload to the largest type's size, which is the fixed-size
+  trade rejected above for the same storage reason.
 - **History** — how many superseded payloads each secret has, when each was archived, and who made
   the edit. A version's contents are sealed under their own Item Key like anything else, so what
   leaks is that a value changed on a given day, never what it changed from. A vault's retention

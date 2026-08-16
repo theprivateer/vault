@@ -71,3 +71,14 @@ Order matters in `changed()`: recompute the fingerprint of the *retired* keys th
 Exactly one link is followed. Do not add a chain walk — a peer whose pin is two rotations stale has missed a conversation, and re-verifying out of band is the honest answer rather than a longer chain of the server's own assertions.
 
 Signed by the key being *retired*. A notice signed by the incoming key attests only that the incoming key exists.
+
+## Dropping empty payload fields is deliberate — do not "tidy" it into a uniform key set
+`buildPayload` in lib/secretTypes.ts omits empty fields. It looks like an optimisation and it is a privacy decision, in the counter-intuitive direction.
+
+Writing every key of a type (empties included) makes items of one type a uniform size. Uniformity TIGHTENS each type's size range, and tight ranges that differ from one another are exactly what lets the padding bucket suggest which type an item is. Dropping empties lets a sparsely-filled address share a bucket with a text item.
+
+Measured: dropping leaves 11 of 12 types able to produce a 128-byte payload; writing every key leaves 8.
+
+Also measured, so nobody re-litigates it: only `server` is ever alone in a bucket (fully populated, empty note). `address` never is, despite having the most fields. 200 characters of notes collapses all twelve types into one bucket — content dominates schema.
+
+Pinned by secretTypes.test.ts ("omits empty fields rather than writing them as empty strings"). Numbers in docs/02 § Accepted leakage.

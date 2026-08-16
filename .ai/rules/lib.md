@@ -4,6 +4,7 @@ paths:
   - resources/js/lib/sharing.ts
   - resources/js/lib/files.ts
   - resources/js/lib/generate.ts
+  - resources/js/lib/secretTypes.ts
 ---
 
 # Lib
@@ -41,3 +42,16 @@ Do not add "at least one of each class" post-processing: it removes valid output
 `strength.ts` is deliberately weaker than zxcvbn — that dependency was declined for A10, with the user's approval. It has no dictionary and overrates words, names and l33t-speak. The meter states that on screen and the tests pin it as a property, so it is not rediscovered as a bug. If a dictionary is ever added, that wording has to change with it.
 
 The EFF wordlist is bundled, never fetched: the CSP forbids it, and asking a CDN for a wordlist tells a third party when somebody is creating a credential. `assertWordlistIntact()` checks the count the entropy arithmetic assumes.
+
+## Secret types are one declarative table — never hand-render a type
+Twelve types share one form builder, one row renderer, one share renderer and one diff, all reading SECRET_TYPES. Adding a type is a row of data. Do not add a bespoke form block or `v-if="type === 'card'"` anywhere — that reintroduces the per-type path from a decrypted field to the DOM that this table exists to remove.
+
+Two invariants, asserted as loops in secretTypes.test.ts:
+- A field is `sensitive` or `indexable`, never both. Masked = it authenticates; indexable = somebody types it to find the item.
+- `indexable` defaults to false. Identifiers and locators opt in (username, host, email, cardholder, city); anything credential-shaped cannot become searchable by accident.
+
+`isSensitive` is asked per type, never per key — `value` is a password on a login and plain text on a text item. Unknown type or unknown field ⇒ treated as sensitive.
+
+`unmappedFields` must keep working: old payloads (every `card` written when cards were one `value` box) and payloads from later builds have to render, and the form carries them through an edit untouched. Dropping what you cannot display turns "we can't show this" into "this is gone".
+
+Padding note: fixed field sets cluster serialised sizes, so the bucket now hints at an item's kind. Recorded in docs/02 § Accepted leakage. Keep writing the type's full key set so items of one type differ only by contents.

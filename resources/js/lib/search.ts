@@ -38,6 +38,19 @@ export const FIELD_WEIGHTS = {
     name: 8,
     /** The lockbox or vault an item sits in. */
     location: 4,
+    /**
+     * Identifiers from the typed fields: usernames, hostnames, email addresses,
+     * cardholders, cities.
+     *
+     * One field rather than one per key, because the ranking question is "how
+     * good a match is this", not "which column matched" — and a single field
+     * means adding a type cannot quietly add a search weight nobody chose.
+     *
+     * What may populate it is decided by `indexable` in lib/secretTypes.ts,
+     * which defaults to false: identifiers and locators are searchable, and
+     * anything that authenticates is not.
+     */
+    identifier: 4,
     url: 2,
     type: 2,
     notes: 1,

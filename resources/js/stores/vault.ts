@@ -38,6 +38,7 @@ import type {
     VaultRecord,
 } from '@/lib/items';
 import { buildIndex, EMPTY_INDEX, search, type Indexable, type SearchIndex } from '@/lib/search';
+import { searchFieldsFor } from '@/lib/secretTypes';
 import { onLock } from '@/stores/lock';
 
 export type OpenedLockbox = Opened<LockboxRecord, LockboxPayload>;
@@ -325,13 +326,7 @@ function indexable(lockboxes: readonly OpenedLockbox[], secrets: readonly Opened
                 ? [
                       {
                           id: entry.record.uuid,
-                          fields: {
-                              name: entry.payload.key,
-                              notes: entry.payload.notes,
-                              url: entry.payload.url ?? '',
-                              type: entry.payload.type,
-                              location: names.get(entry.record.lockboxUuid) ?? '',
-                          },
+                          fields: searchFieldsFor(entry.payload, names.get(entry.record.lockboxUuid) ?? ''),
                       },
                   ]
                 : [],

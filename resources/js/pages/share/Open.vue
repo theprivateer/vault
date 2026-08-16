@@ -18,13 +18,14 @@
  * is open — which is stated on screen, because the recipient is usually not a
  * user of this system and has no reason to assume anything about it.
  */
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 
 import NoticePanel from '@/components/NoticePanel.vue';
+import SecretFieldValue from '@/components/SecretFieldValue.vue';
 import { decodeFragment, type LinkCredentials } from '@/crypto/sharelink';
-import { copyForATime, CLIPBOARD_TTL_MS } from '@/lib/clipboard';
 import { describeError } from '@/lib/errors';
 import type { SecretPayload } from '@/lib/items';
+import { fieldsFor, labelFor, readField, unmappedFields } from '@/lib/secretTypes';
 import { revealShareLink } from '@/lib/sharelink';
 import { useDocumentTitle } from '@/lib/title';
 
@@ -33,7 +34,6 @@ const payload = ref<SecretPayload | null>(null);
 const viewsRemaining = ref(0);
 const failure = ref('');
 const busy = ref(false);
-const copied = ref(false);
 const revealed = ref(false);
 
 onMounted(() => {
@@ -80,13 +80,41 @@ async function open(): Promise<void> {
     }
 }
 
-async function copy(): Promise<void> {
-    if (!payload.value) {
-        return;
+const typeLabel = computed(() => (payload.value ? labelFor(payload.value.type) : ''));
+
+/**
+ * Every field the shared payload actually carries, schema fields first.
+ *
+ * The unmapped ones are included for the same reason the vault includes them: a
+ * recipient who is shown nothing where a value exists cannot tell "this build
+ * has no field for that" from "the sender shared an empty item".
+ */
+const fields = computed(() => {
+    const opened = payload.value;
+
+    if (!opened) {
+        return [];
     }
 
-    await copyForATime(payload.value.value);
-    copied.value = true;
+    const placed = fieldsFor(opened.type).flatMap((field) => {
+        const value = readField(opened, field.key);
+
+        return field.key === 'linkedLockboxUuid' || value === '' ? [] : [{ field, value }];
+    });
+
+    return [...placed, ...unmappedFields(opened)];
+});
+
+const shown = ref(new Set<string>());
+
+function toggle(key: string): void {
+    const next = new Set(shown.value);
+
+    if (!next.delete(key)) {
+        next.add(key);
+    }
+
+    shown.value = next;
 }
 
 useDocumentTitle('Shared secret');
@@ -103,23 +131,27 @@ useDocumentTitle('Shared secret');
         <template v-else-if="payload">
             <div class="panel mt-6 space-y-3 p-4">
                 <div>
-                    <p class="text-2xs tracking-[0.08em] text-faint uppercase">{{ payload.type }}</p>
+                    <p class="text-2xs tracking-[0.08em] text-faint uppercase">{{ typeLabel }}</p>
                     <p class="mt-1 text-sm">{{ payload.key }}</p>
                 </div>
 
-                <p class="text-sm break-all">{{ payload.value }}</p>
-
-                <p v-if="payload.notes" class="text-2xs text-muted">{{ payload.notes }}</p>
-                <p v-if="payload.url" class="text-2xs text-muted">{{ payload.url }}</p>
-
-                <button type="button" class="btn" @click="copy">
-                    {{ copied ? 'copied' : 'copy' }}
-                </button>
-
-                <p v-if="copied" class="text-2xs text-muted" role="status">
-                    Cleared from the clipboard in {{ Math.round(CLIPBOARD_TTL_MS / 1000) }} seconds, if
-                    nothing else has copied since.
-                </p>
+                <!--
+                    The same schema the vault renders from, so a shared card
+                    arrives as a card rather than as one string. Sensitive fields
+                    still take a deliberate click here: this page is open to
+                    somebody with no account, quite possibly on a shared screen,
+                    and a link in a chat window is the least private way anything
+                    in this application ever travels.
+                -->
+                <SecretFieldValue
+                    v-for="entry in fields"
+                    :key="entry.field.key"
+                    :field="entry.field"
+                    :value="entry.value"
+                    :item-label="payload.key"
+                    :revealed="shown.has(entry.field.key)"
+                    @toggle="toggle(entry.field.key)"
+                />
             </div>
 
             <div class="mt-6 space-y-2 text-2xs text-muted">

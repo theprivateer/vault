@@ -26,6 +26,7 @@ import type { CryptoClient } from '@/crypto/worker/client';
 import { openAll, type Opened, type ProgressCallback } from './decrypt';
 import { diffLines, type DiffOp } from './diff';
 import { sealItem, type EncryptedItem, type SecretPayload } from './items';
+import { ALL_FIELD_KEYS, readField } from './secretTypes';
 import { uuid7 } from './uuid';
 
 /** One archived payload, as the server sends it: ciphertext and a timestamp. */
@@ -111,19 +112,28 @@ export interface FieldDiff {
  * by a future build could carry a field this one knows nothing about, and
  * rendering an unknown key's contents into the page is how a diff view becomes
  * the place where an unexpected value gets displayed unlabelled.
+ *
+ * Derived from `ALL_FIELD_KEYS` so the structured types are covered without this
+ * list being a second place to remember. It stays a closed set either way —
+ * every key in it is one some type declares.
  */
-const COMPARED = ['key', 'value', 'notes', 'url', 'type'] as const;
+const COMPARED: readonly string[] = ['key', 'type', ...ALL_FIELD_KEYS];
 
 /**
  * Compares two decrypted payloads, field by field.
  *
  * `paranoid` is deliberately absent — it is a boolean UI hint and "the sensitive
  * flag changed" is not something a diff needs a text comparison for.
+ *
+ * A field neither version populates is reported as unchanged rather than
+ * skipped, so the caller keeps deciding what to render: `History.vue` filters on
+ * `changed`, and a card's version history should not list five empty address
+ * fields as evidence that nothing happened to them.
  */
 export function comparePayloads(before: SecretPayload, after: SecretPayload): FieldDiff[] {
     return COMPARED.map((field) => {
-        const a = String(before[field] ?? '');
-        const b = String(after[field] ?? '');
+        const a = readField(before, field);
+        const b = readField(after, field);
 
         return {
             field,

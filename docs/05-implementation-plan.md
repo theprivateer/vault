@@ -1,7 +1,10 @@
 # 05 — Implementation Plan
 
-Thirteen phases. Each has a single theme, produces something demonstrable, and ends with exit
+Fourteen phases. Each has a single theme, produces something demonstrable, and ends with exit
 criteria that are checkable rather than felt. Nothing in phase N depends on phase N+1.
+
+Phase 13 was added after Phase 11, when a question about what the five secret types actually *did*
+turned out to have the answer "nothing" — see its own section for why that was worth fixing.
 
 Sizes are relative effort, not dates: **S** ≈ a sitting, **M** ≈ a few, **L** ≈ a sustained
 stretch, **XL** ≈ the biggest things here.
@@ -14,6 +17,7 @@ stretch, **XL** ≈ the biggest things here.
     └─> 2 Identity & unlock                    │
         └─> 3 Vault CRUD + leak canary         │
             ├─> 4 Client state & search        │
+            │   ├─> 13 Typed secrets           │
             │   └─> 5 Sharing & revocation     │
             │       ├─> 6 Files                │
             │       ├─> 7 Audit log            │
@@ -823,6 +827,116 @@ reaching the browser tab through `document.title`.
 ### Exit criteria
 
 Deployed, monitored, backed up, restore-tested, exportable, documented.
+
+---
+
+## Phase 13 — Typed secrets
+
+**Size: M.** Added after Phase 11, from a question rather than from this plan: a secret could be
+one of five types — did they mean anything?
+
+They did not. `type` was stored inside the payload, which was the right call and remains one, but
+nothing branched on it. It rendered as a label, ranked in search at weight 2, and populated a
+`<select>`. All five produced byte-identical forms. Three of them actively promised structure that
+was not there: `card` offered one `value` box for a number, an expiry and a security code; `key`
+and `note` were unusable for their stated purpose because the only control in the application was
+a single-line `<input>`, so a private key or a note with a paragraph break could not be entered at
+all; and `lockbox` collided with the `linkedLockboxUuid` control sitting eight lines below it on
+the same form.
+
+### Deliverables
+
+Twelve types whose fields differ, driven by one declarative schema.
+
+### Tasks
+
+1. `lib/secretTypes.ts`: type → ordered `{key, label, control, sensitive, indexable}`, and the
+   accessors over it.
+2. One form builder, one row renderer, one share renderer, all reading that table.
+3. `TextArea.vue`, whose absence was the reason `note` and `key` did not work.
+4. `username` on the login-shaped types.
+5. Per-field masking and per-field reveal, replacing the item-level `paranoid` gate.
+6. The search rule as a schema property, defaulting to not-indexed.
+7. The four new types: `text`, `url`, `email`, `otp`; then `address`, `server`, `api`.
+
+### Exit criteria
+
+Every type's field set is asserted as a table, not reviewed by eye. No credential field is
+indexable. Old payloads still render, and an edit does not drop what the schema cannot place.
+
+### Carried forward from Phase 13
+
+All seven tasks are built. `resources/js/lib/secretTypes.test.ts` asserts the properties as loops
+over the table, which is the entire argument for the table existing: twelve bespoke form blocks
+would need twelve reviews to establish that no credential is searchable and no token renders
+unmasked.
+
+**The schema shape was the decision, not the type list.** Twelve types × bespoke rendering would
+have been twelve separate paths from a decrypted field to the DOM, in four components each. One
+table means adding a type is a row of data and cannot introduce a new path at all.
+
+**Three properties are now checkable rather than reviewable.**
+
+- *A field is masked or it is searchable, never both.* That invariant needs no list to check and is
+  asserted across the whole table. Masked means "this authenticates something"; searchable means
+  "somebody types this to find the item"; nothing is honestly both.
+- *The search default is not-indexed.* Identifiers and locators opt in — username, host, email
+  address, cardholder, city, country — and a credential-shaped field cannot become searchable by
+  somebody adding it without thinking. The standing "values are never indexed" rule survives with
+  one honest exception: a `url` item's value is a locator and an `email` item's is an address, and
+  neither authenticates anything.
+- *`isSensitive` is asked per type, never per key.* `value` is a password on a login and a plain
+  string on a text item. Anything a type does not declare is treated as sensitive, so an
+  unrecognised field errs towards hidden.
+
+**Nothing decrypted may disappear from the page**, which is where most of the care went. Two
+payloads hit this: one written by a later build carrying a key this one has never heard of, and —
+much more likely — every `card` created while cards were a single `value` box. Both render, via
+`unmappedFields`, labelled by their raw key and masked. The form carries them through an edit
+untouched, because an editor that dropped what it could not display would turn "we cannot show
+this" into "this is gone", silently, on the first save. A type this build does not recognise is
+never reinterpreted under a default schema either — that would put a token in a field labelled
+"note" and mask nothing.
+
+**Three judgement calls worth naming.**
+
+`totp` stayed available on `password` and `server` rather than moving wholly to the new `otp` type.
+A login with a second factor is the case the field exists for; confining the seed to a standalone
+type would split one credential across two items and orphan the `totp` already inside existing
+password payloads. `otp` is for the case where the password genuinely lives elsewhere.
+
+`notes` stayed on every type, against the "all other fields off by default" instruction, because it
+is the escape hatch that stops somebody forcing an address into a card for want of anywhere else to
+put it. A typed field set is only an improvement while there is somewhere to go when it does not
+fit. `url` likewise appears on `password`, `email`, `server` and `api` — "where I use this" is a
+different question from "this item *is* a link".
+
+`email` is a single address rather than a mailbox account with server settings. It sits with `text`
+and `url` in how it behaves, and a mailbox you sign in to is a `password` item. If the fuller shape
+is wanted it is a five-line change to the table, which is the point of the table.
+
+**Outstanding:** `PAYLOAD_VERSION` stayed at 2 and nothing was migrated, because every new field is
+additive and optional. That is genuinely free rather than deferred work.
+
+**The size question was asked properly afterwards, and the first answer had been wrong.** The
+worry — fixed field sets cluster serialised sizes, so the padding bucket hints at an item's kind —
+was stated in this document and in the module before anybody measured it. Measuring gave a
+different shape: only `server` is ever alone in a bucket, and only fully populated with no note at
+all; `address`, despite carrying the most fields, never is. A hundred characters of notes puts
+`server` back among four other types and two hundred collapses all twelve into one bucket, because
+the dominant term in a payload's size is its content rather than its schema.
+
+More usefully, the mitigation this document originally claimed was backwards. It said each item
+was written with its type's full key set present, to make items of one type differ only by their
+contents — which is not what the code does, and is not what one would want it to do. Uniform key
+sets *tighten* each type's size range, and tight ranges that differ from one another are what makes
+types separable at all. `buildPayload` drops empty fields, which lets a sparse address share a
+bucket with a text item: eleven of twelve types can produce a 128-byte payload that way, against
+eight if every key were written. The code was right and the reasoning printed next to it was not.
+Both are corrected, the numbers are in
+[02 § Accepted leakage](02-threat-model.md#accepted-leakage), and
+`secretTypes.test.ts` pins the dropping behaviour with its reason attached, so it is not tidied
+into uniformity by somebody who assumes what this document originally assumed.
 
 ---
 

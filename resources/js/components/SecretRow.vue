@@ -1,27 +1,25 @@
 <script setup lang="ts">
 /**
- * One secret, masked until asked for.
+ * One secret, rendered from its type's schema.
  *
  * The value is already decrypted and in memory by the time this renders —
  * masking is an interface courtesy against shoulder-surfing and screen sharing,
  * not a security boundary. Saying so plainly matters more than pretending
  * otherwise: anything that reaches this component has already been decrypted.
  *
- * **Masking and screen readers.** A row of bullet characters is nonsense read
- * aloud, and worse, a naive mask leaks the length of the password to anyone
- * counting dots. So the mask is a fixed-width run marked `aria-hidden`, with
- * the real state announced in words beside it — and when the value is revealed,
- * the announcement says so, because someone using a screen reader in a shared
- * room deserves to know their password is now on screen.
+ * Reveal is per field rather than per item, because a structured type has fields
+ * of different kinds: a card's number and security code deserve a deliberate
+ * click and the name printed beside them does not. `paranoid` still gates the
+ * first reveal of any of them.
  */
 import { Link } from '@inertiajs/vue3';
-import { computed, nextTick, ref, useId } from 'vue';
+import { computed, nextTick, ref } from 'vue';
 
 import NoticePanel from '@/components/NoticePanel.vue';
-import TotpCode from '@/components/TotpCode.vue';
+import SecretFieldValue from '@/components/SecretFieldValue.vue';
 import { reportReveal } from '@/lib/audit';
-import { copyForATime, CLIPBOARD_TTL_MS } from '@/lib/clipboard';
 import type { SecretPayload, SecretRecord } from '@/lib/items';
+import { fieldsFor, labelFor, readField, unmappedFields, type SecretField } from '@/lib/secretTypes';
 import { useSession } from '@/stores/session';
 
 const props = defineProps<{
@@ -36,29 +34,70 @@ const emit = defineEmits<{ edit: []; remove: []; share: [] }>();
 
 const { crypto } = useSession();
 
-const revealed = ref(false);
-const copied = ref(false);
-const confirming = ref(false);
-const valueId = useId();
-const value = ref<HTMLParagraphElement | null>(null);
+const revealed = ref(new Set<string>());
+const confirming = ref<string | null>(null);
 const confirmButton = ref<HTMLButtonElement | null>(null);
 
-/** A fixed run: a mask as long as the password would announce its length. */
-const MASK = '••••••••••••';
-
 const label = computed(() => props.payload?.key ?? 'this secret');
+
+const typeLabel = computed(() => (props.payload ? labelFor(props.payload.type) : ''));
+
+/**
+ * The fields this item actually has something in.
+ *
+ * Empty fields are dropped rather than rendered as blank rows: an address with
+ * no second line should not show one, and a password item should not advertise
+ * that it has no one-time code.
+ */
+const populated = computed<{ field: SecretField; value: string }[]>(() => {
+    const payload = props.payload;
+
+    if (!payload) {
+        return [];
+    }
+
+    return fieldsFor(payload.type).flatMap((field) => {
+        // `linkedLockboxUuid` is a column rather than a payload key, and it
+        // renders by name at the foot of the row instead of as a raw UUID.
+        if (field.key === 'linkedLockboxUuid') {
+            return [];
+        }
+
+        const value = readField(payload, field.key);
+
+        return value === '' ? [] : [{ field, value }];
+    });
+});
+
+/**
+ * Anything in the payload this build's schema does not place.
+ *
+ * A payload written by a later build — or by an earlier one, whose `card` items
+ * kept everything in `value` before cards had fields — must not have content
+ * silently disappear from the page. It is shown, labelled by its raw key and
+ * masked, because a field this build cannot identify is one it cannot judge safe
+ * to display in the clear.
+ */
+const unmapped = computed(() => (props.payload ? unmappedFields(props.payload) : []));
 
 /**
  * `paranoid` items ask before revealing.
  *
  * A confirmation step, not a re-authentication: asking for the password again
  * would prove nothing the browser does not already hold, since it is already
- * unlocked. It is a guard against a misplaced click while sharing a screen,
- * and it is labelled as exactly that.
+ * unlocked. It is a guard against a misplaced click while sharing a screen, and
+ * it is labelled as exactly that.
  */
-async function reveal(): Promise<void> {
-    if (props.payload?.paranoid && !revealed.value && !confirming.value) {
-        confirming.value = true;
+async function reveal(key: string): Promise<void> {
+    if (revealed.value.has(key)) {
+        revealed.value.delete(key);
+        revealed.value = new Set(revealed.value);
+
+        return;
+    }
+
+    if (props.payload?.paranoid && confirming.value !== key) {
+        confirming.value = key;
 
         // Focus follows the decision it is asking for. Leaving focus on the
         // reveal button means a keyboard user is told a question was asked and
@@ -69,36 +108,26 @@ async function reveal(): Promise<void> {
         return;
     }
 
-    revealed.value = !revealed.value;
-    confirming.value = false;
+    revealed.value = new Set(revealed.value).add(key);
+    confirming.value = null;
 
-    if (revealed.value) {
-        /*
-         | The one thing the server cannot see, and the first question after any
-         | compromise: which credentials did that session actually look at? A
-         | page load fetches the whole vault's ciphertext whether one item is
-         | opened or none, so only this tab knows.
-         |
-         | Signed in the Worker and posted fire-and-forget. A failed report must
-         | never stop a reveal — the secret was revealed either way, and an
-         | error over a working feature teaches people to ignore errors.
-         */
+    /*
+     | The one thing the server cannot see, and the first question after any
+     | compromise: which credentials did that session actually look at? A page
+     | load fetches the whole vault's ciphertext whether one item is opened or
+     | none, so only this tab knows.
+     |
+     | Reported once per item rather than once per field — the log records that
+     | a secret was looked at, and turning one glance at a card into four
+     | entries would make the feed less readable without saying anything more.
+     |
+     | Signed in the Worker and posted fire-and-forget. A failed report must
+     | never stop a reveal: the secret was revealed either way, and an error over
+     | a working feature teaches people to ignore errors.
+     */
+    if (revealed.value.size === 1) {
         reportReveal(crypto(), props.record.uuid);
-
-        await nextTick();
-        value.value?.focus();
     }
-}
-
-async function copy(): Promise<void> {
-    if (!props.payload) {
-        return;
-    }
-
-    await copyForATime(props.payload.value);
-
-    copied.value = true;
-    setTimeout(() => (copied.value = false), 2_000);
 }
 </script>
 
@@ -106,32 +135,14 @@ async function copy(): Promise<void> {
     <div :id="`secret-${record.uuid}`" class="p-4">
         <NoticePanel v-if="error" tone="accent" heading="integrity failure">{{ error }}</NoticePanel>
 
-        <div v-else-if="payload" class="space-y-2">
+        <div v-else-if="payload" class="space-y-3">
             <div class="flex items-baseline justify-between gap-4">
                 <div>
                     <p class="text-sm">{{ payload.key }}</p>
-                    <p class="text-2xs tracking-[0.08em] text-faint uppercase">{{ payload.type }}</p>
+                    <p class="text-2xs tracking-[0.08em] text-faint uppercase">{{ typeLabel }}</p>
                 </div>
 
                 <div class="flex items-center gap-3 text-2xs">
-                    <button
-                        type="button"
-                        class="text-muted hover:text-ink"
-                        :aria-expanded="revealed"
-                        :aria-controls="valueId"
-                        :aria-label="`${revealed ? 'Hide' : 'Reveal'} the value of ${label}`"
-                        @click="reveal"
-                    >
-                        {{ revealed ? 'hide' : 'reveal' }}
-                    </button>
-                    <button
-                        type="button"
-                        class="text-muted hover:text-ink"
-                        :aria-label="`Copy the value of ${label} to the clipboard`"
-                        @click="copy"
-                    >
-                        {{ copied ? 'copied' : 'copy' }}
-                    </button>
                     <!--
                         Offered only where there is history, so the row does not
                         advertise a page that would tell the reader nothing. The
@@ -182,50 +193,31 @@ async function copy(): Promise<void> {
                     ref="confirmButton"
                     type="button"
                     class="ml-2 underline underline-offset-2"
-                    @click="reveal"
+                    @click="reveal(confirming)"
                 >
                     show it
                 </button>
             </NoticePanel>
 
-            <!--
-                tabindex="-1" so focus can be moved here on reveal without
-                putting the paragraph into the tab order, which would make
-                every secret an extra stop on the way down the page.
-            -->
-            <p
-                :id="valueId"
-                ref="value"
-                tabindex="-1"
-                class="text-sm break-all"
-                :class="revealed ? '' : 'text-faint select-none'"
-            >
-                <span v-if="revealed">{{ payload.value }}</span>
-                <template v-else>
-                    <span aria-hidden="true">{{ MASK }}</span>
-                    <span class="sr-only">Value hidden. Use the reveal button to show it.</span>
-                </template>
-            </p>
+            <SecretFieldValue
+                v-for="entry in populated"
+                :key="entry.field.key"
+                :field="entry.field"
+                :value="entry.value"
+                :item-label="label"
+                :revealed="revealed.has(entry.field.key)"
+                @toggle="reveal(entry.field.key)"
+            />
 
-            <p v-if="revealed" class="sr-only" role="status">
-                The value of {{ label }} is now visible on screen.
-            </p>
-
-            <!--
-                The one-time code, generated here from a seed that has never left
-                this browser. Shown unmasked and without a reveal step: a TOTP
-                code is worth thirty seconds and is useless without the password
-                above it, so hiding it would be ceremony rather than protection.
-            -->
-            <TotpCode v-if="payload.totp" :secret="payload.totp" :label="label" />
-
-            <p v-if="copied" class="text-2xs text-muted" role="status">
-                Cleared from the clipboard in {{ Math.round(CLIPBOARD_TTL_MS / 1000) }} seconds, if nothing
-                else has copied since.
-            </p>
-
-            <p v-if="payload.url" class="text-2xs text-muted">{{ payload.url }}</p>
-            <p v-if="payload.notes" class="text-2xs text-muted">{{ payload.notes }}</p>
+            <SecretFieldValue
+                v-for="entry in unmapped"
+                :key="entry.field.key"
+                :field="entry.field"
+                :value="entry.value"
+                :item-label="label"
+                :revealed="revealed.has(entry.field.key)"
+                @toggle="reveal(entry.field.key)"
+            />
 
             <p v-if="linkedLockboxName" class="text-2xs text-accent">
                 <span aria-hidden="true">linked lockbox &rarr;</span>
