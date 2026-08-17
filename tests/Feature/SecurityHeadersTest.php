@@ -57,9 +57,25 @@ it('enforces trusted types with no default policy', function () {
 
     expect($directives)->toHaveKey('require-trusted-types-for')
         ->and($directives['require-trusted-types-for'])->toBe("'script'")
-        // Vue's runtime registers a policy under this name for its own two
-        // sinks. Nothing in resources/js registers one at all.
-        ->and($directives['trusted-types'])->toBe('vue');
+        /*
+         | Exactly two names. `vue` is registered by Vue's runtime for its own
+         | two sinks; `vault-worker` is ours, and exists because `new Worker(url)`
+         | is a sink as well — it is a way to make the browser fetch and run
+         | code. That policy accepts one URL and throws on anything else, which
+         | is what keeps it an exception rather than a hole; see
+         | resources/js/crypto/worker/client.ts.
+         */
+        ->and($directives['trusted-types'])->toBe('vue vault-worker');
+});
+
+/*
+ | Regression guard for the deployment that found this. The crypto Worker cannot
+ | be constructed at all without its policy name here, so the application starts
+ | and then reports that encryption is unavailable — which looks like a broken
+ | build rather than a missing directive.
+ */
+it('names the policy the crypto worker needs, or nothing can be encrypted', function () {
+    expect(cspDirectives($this->get('/login'))['trusted-types'])->toContain('vault-worker');
 });
 
 it('does not allow a policy to be created twice or by default', function (string $forbidden) {

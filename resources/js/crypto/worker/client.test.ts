@@ -4,7 +4,14 @@ import type { AadParams } from '../aad';
 import { verifyGrant } from '../grant';
 import { deriveFromPassword, generateKdfSalt, generateKey, wrapKey } from '../keys';
 import { constantTimeEqual, utf8ToBytes } from '../primitives';
-import { CryptoClient, WORKER_URL, isIntegrityFailure, toCloneable } from './client';
+import {
+    CryptoClient,
+    WORKER_POLICY_NAME,
+    WORKER_URL,
+    isIntegrityFailure,
+    toCloneable,
+    workerScriptUrl,
+} from './client';
 import type { WorkerScope } from './handler';
 import { installHandler } from './handler';
 import type { Reply, Request } from './protocol';
@@ -380,6 +387,85 @@ describe('default worker factory', () => {
         } finally {
             vi.unstubAllGlobals();
         }
+    });
+
+    /*
+     | `new Worker(url)` is a Trusted Types sink — it makes the browser fetch and
+     | run code — so under `require-trusted-types-for 'script'` the constructor
+     | refuses a plain string. A real deployment found this, because the CSP
+     | drops Trusted Types under the Vite dev server and nothing had ever run a
+     | browser against the header that ships.
+     |
+     | Each case re-imports the module, because the policy is memoised: a second
+     | `createPolicy` under one name is refused by the browser, so the module
+     | creates it once and a shared memo would make these tests depend on the
+     | order they ran in.
+     */
+    describe('the trusted script URL', () => {
+        type Rules = { createScriptURL: (url: string) => string };
+
+        /** Loads a fresh copy of the module with `trustedTypes` in place. */
+        async function withTrustedTypes(): Promise<{
+            url: string;
+            names: string[];
+            rules: Rules;
+        }> {
+            const names: string[] = [];
+            let rules: Rules | null = null;
+
+            vi.resetModules();
+            vi.stubGlobal('trustedTypes', {
+                createPolicy: (name: string, given: Rules) => {
+                    names.push(name);
+                    rules = given;
+
+                    return { createScriptURL: (url: string) => given.createScriptURL(url) };
+                },
+            });
+
+            try {
+                const module = await import('./client');
+                const url = module.workerScriptUrl() as string;
+
+                if (!rules) {
+                    throw new Error('The module did not create a policy.');
+                }
+
+                return { url, names, rules };
+            } finally {
+                vi.unstubAllGlobals();
+            }
+        }
+
+        it('is a plain string where the API does not exist', () => {
+            expect(workerScriptUrl()).toBe(WORKER_URL);
+        });
+
+        it('goes through a named policy where it does', async () => {
+            const { url, names } = await withTrustedTypes();
+
+            expect(url).toBe(WORKER_URL);
+            expect(names).toEqual([WORKER_POLICY_NAME]);
+        });
+
+        /*
+         | The property that keeps this a small exception rather than a hole. A
+         | policy that returned its input would be the `default` policy the CSP
+         | deliberately refuses, spelled differently — so this asks the rules for
+         | something else and requires a refusal.
+         */
+        it('will not produce a URL for anything but the worker', async () => {
+            const { rules } = await withTrustedTypes();
+
+            expect(() => rules.createScriptURL('https://elsewhere.example/evil.js')).toThrow(
+                /will only ever produce/,
+            );
+            // Matched on message, not on class: `vi.resetModules()` builds a
+            // fresh module graph, so the error class inside it is a different
+            // identity from the one imported at the top of this file.
+            expect(() => rules.createScriptURL(`${WORKER_URL}?x=1`)).toThrow(/not to make URLs trusted/);
+            expect(rules.createScriptURL(WORKER_URL)).toBe(WORKER_URL);
+        });
     });
 
     it('reports a worker that cannot be started, instead of failing generically', async () => {

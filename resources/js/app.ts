@@ -5,10 +5,21 @@ import { createApp, h } from 'vue';
 
 import RequestChrome from '@/components/RequestChrome.vue';
 
-const appName = import.meta.env.VITE_APP_NAME ?? 'Vault';
-
 void createInertiaApp({
-    title: (title) => (title ? `${title} — ${appName}` : appName),
+    /*
+     | **No `title` callback**, and its absence is load-bearing rather than an
+     | omission. Inertia's head manager calls that callback with an empty string
+     | to decide whether it owns a title; anything truthy comes back as
+     | `<title data-inertia="">…</title>`, which the renderer then builds by
+     | assigning to `template.innerHTML` — on app start and on every navigation.
+     | With Trusted Types enforced that throws, which is what a real deployment
+     | showed the first time a browser ran against the shipped header.
+     |
+     | The suffix rule lives in lib/title.ts, which sets `document.title`
+     | directly. That is a plain string property and not a sink at all, so with
+     | the callback gone the head manager collects nothing and never reaches the
+     | renderer. Do not reintroduce this option, and do not use `<Head>`.
+     */
 
     /*
      | Inertia's progress bar builds itself by assigning a template string to

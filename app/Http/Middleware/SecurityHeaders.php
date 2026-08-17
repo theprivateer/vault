@@ -63,12 +63,18 @@ class SecurityHeaders
          | is the one control here that survives a bug in our own code: the
          | classic XSS chain ends at a sink, and this closes the sink.
          |
-         | Exactly one policy name is allowed, and it is not ours. Vue's
-         | runtime-dom registers a policy called `vue` at import time and routes
-         | its own two sinks through it; nothing in resources/js registers one,
-         | and `allow-duplicates` is absent, so a second attempt to create a
-         | policy under that name — the standard way injected script buys itself
-         | a sink — is refused by the browser.
+         | Two policy names are allowed and no more. Vue's runtime-dom
+         | registers `vue` at import time and routes its own two sinks through
+         | it. `vault-worker` is ours, and it exists because `new Worker(url)`
+         | is a Trusted Types sink too — it is a way to make the browser fetch
+         | and run code — so the crypto Worker cannot be constructed from a
+         | plain string. That policy accepts exactly one URL and throws on
+         | anything else (crypto/worker/client.ts), which is what keeps it an
+         | auditable exception rather than a hole.
+         |
+         | `allow-duplicates` is absent, so a second attempt to create a policy
+         | under either name — the standard way injected script buys itself a
+         | sink — is refused by the browser.
          |
          | There is deliberately no `default` policy. A default policy is
          | consulted for every sink assignment that did not go through a named
@@ -80,7 +86,7 @@ class SecurityHeaders
          | ours rather than Inertia's — see the note there.
          */
         'require-trusted-types-for' => "'script'",
-        'trusted-types' => 'vue',
+        'trusted-types' => 'vue vault-worker',
     ];
 
     /**

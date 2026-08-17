@@ -25,6 +25,15 @@
  * Neither replaces the other. This is still not a browser — a genuine end-to-end
  * check against a real Worker in a real page is the honest form of both, and
  * docs/02-threat-model.md says so rather than claiming this is that.
+ *
+ * **And the sweep has a blind spot that a deployment found.** It reads
+ * `resources/js`, so a sink inside a *dependency* is invisible to it. Inertia's
+ * head manager builds every element it owns by assigning to `template.innerHTML`,
+ * and it owns a `<title>` the moment `createInertiaApp` is given a `title`
+ * callback that returns something for an empty string. Every assertion in this
+ * file passed while the shipped bundle threw on its first paint in a browser
+ * enforcing the header. The guard for that specific trigger is below; the
+ * general answer is still an end-to-end suite.
  */
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -212,6 +221,25 @@ describe('trusted types: the sinks the CSP forbids', () => {
      | rule is about XSS while this is about the page still working: with no
      | default policy, Vue's `v-html` path throws rather than rendering.
      */
+    /*
+     | The trigger, guarded specifically because the sweep above cannot see it.
+     |
+     | Inertia's `collect()` calls the title callback with an empty string to
+     | decide whether it owns a title element; anything truthy comes back as
+     | `<title data-inertia="">…</title>` and is then built through
+     | `template.innerHTML`, on start-up and on every navigation. With no
+     | callback it collects nothing and never reaches the renderer.
+     |
+     | The suffix rule lives in lib/title.ts, which assigns `document.title` —
+     | a plain string property and not a sink at all.
+     */
+    it('gives Inertia no title callback, so its head manager owns no element', () => {
+        const app = stripComments(readFileSync(join(SOURCE_ROOT, 'app.ts'), 'utf8'));
+
+        expect(app).toContain('createInertiaApp');
+        expect(app).not.toMatch(/\btitle\s*:/);
+    });
+
     it('uses no v-html', () => {
         expect(mentioning([/v-html/])).toEqual([]);
     });

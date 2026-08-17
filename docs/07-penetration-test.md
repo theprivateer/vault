@@ -216,6 +216,46 @@ survives a failed submit inside the component.
 `tests/Feature/FlashedInputTest.php` asserts the session carries **nothing**, in those terms, so a
 field added next year is covered without anyone remembering to come back to it.
 
+### F12 — Trusted Types broke the application on its first real deployment
+
+**Severity: high — the application did not work at all. Fixed.** *Found by deploying it, which is
+the only way it could have been found.*
+
+Two sinks, one cause. On the first page load behind the shipped CSP, the browser refused
+`new Worker('/build/crypto.worker.js')` — the Worker constructor takes a **TrustedScriptURL**, not a
+string, because it is a way to make the browser fetch and execute code — so every page reported that
+encryption was unavailable. Separately, Inertia's head manager threw a `TrustedHTML` violation on
+start-up and on every navigation.
+
+The head one is the more interesting. This application deliberately does not use Inertia's `<Head>`,
+for exactly this reason, and `lib/title.ts` sets `document.title` directly because that is a plain
+string property and not a sink. But `createInertiaApp` was still being passed a `title` callback —
+left behind when the formatting moved into `lib/title.ts`, and apparently harmless. Inertia's head
+manager calls that callback with an empty string to decide whether it owns a title element; ours
+returned the application name, which is truthy, so the manager built `<title data-inertia="">…</title>`
+through `template.innerHTML` on every render. Removing the option makes it collect nothing.
+
+**Why nothing caught it.** `SecurityHeadersTest` asserts the directive is sent, and
+`security.test.ts` sweeps `resources/js` for sinks — and both were right. The sink was in a
+*dependency*, which the sweep cannot see, and the constructor call was in our code but is only a
+sink under a header no test environment applies: the CSP **drops Trusted Types entirely under the
+Vite dev server**, because the Vite client builds its own error overlay from a string. The comment
+on that line already said "the directive that ships is one nobody exercises while writing code",
+which turned out to be exactly right and not enough.
+
+This is the concrete cost of the missing end-to-end suite, which
+[08 § What I would do differently](08-retrospective.md) had listed as a regret in the abstract the
+day before this happened.
+
+**Fixed** by a named policy, `vault-worker`, added to the `trusted-types` directive and created in
+`crypto/worker/client.ts` — one that accepts the single known worker URL and throws on anything
+else, so it stays an auditable exception rather than becoming the `default` policy this design
+refuses. The `title` option is gone, and `security.test.ts` now asserts its absence.
+
+For the record, Inertia has five sink assignments and all five are now accounted for: two build its
+error modal (suppressed with `preventDefault()` on `httpException` and `networkError` in
+`RequestChrome.vue`), one builds its progress bar (`progress: false`), and two are the head manager.
+
 ## The checklist, and what it did not find
 
 Recorded because "we checked and it was fine" is information, and because the next person to look

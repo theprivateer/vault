@@ -45,7 +45,86 @@ export type WorkerFactory = () => Worker;
  */
 export const WORKER_URL = '/build/crypto.worker.js';
 
-const defaultFactory: WorkerFactory = () => new Worker(WORKER_URL, { type: 'module' });
+/**
+ * The Worker constructor is a Trusted Types sink, and this is its policy.
+ *
+ * `new Worker(someString)` is a way to get the browser to fetch and execute
+ * code, so under `require-trusted-types-for 'script'` the URL argument has to
+ * be a `TrustedScriptURL` rather than a string. Without this the constructor
+ * throws before it has resolved anything, and the whole application reports
+ * that encryption is unavailable — which is what a real deployment did the
+ * first time this policy was enforced by a browser, because the CSP drops
+ * Trusted Types entirely under the Vite dev server (see SecurityHeaders) and
+ * nothing else had ever run against the header that ships.
+ *
+ * **The policy is not an escape hatch.** It accepts exactly one string — the
+ * constant above — and throws on anything else, so it cannot be used to load
+ * arbitrary code even by something running inside this module. That matters:
+ * the whole point of `trusted-types` naming its policies is that a policy is a
+ * small, auditable exception, and one that returns its input unchanged would be
+ * the `default` policy this design deliberately refuses.
+ */
+export const WORKER_POLICY_NAME = 'vault-worker';
+
+/**
+ * A TrustedScriptURL, as an opaque brand.
+ *
+ * `@types/trusted-types` is not a dependency, and adding one for two signatures
+ * is a poor trade against the rule that this module's dependency surface stays
+ * tiny. The brand is deliberately not `string`: a TrustedScriptURL is not one,
+ * and the single cast at the constructor below is the only place that pretends
+ * otherwise.
+ */
+declare const trustedScriptUrl: unique symbol;
+
+type TrustedScriptUrl = { readonly [trustedScriptUrl]: true };
+
+interface ScriptUrlPolicy {
+    createScriptURL(url: string): TrustedScriptUrl;
+}
+
+interface TrustedTypesFactory {
+    createPolicy(name: string, rules: { createScriptURL: (url: string) => string }): ScriptUrlPolicy;
+}
+
+let policy: ScriptUrlPolicy | undefined;
+
+/**
+ * The Worker's URL, trusted where the browser requires it and a plain string
+ * where the API does not exist — Node under test, and any browser without
+ * Trusted Types, where the string is what the constructor wants anyway.
+ */
+export function workerScriptUrl(): string | TrustedScriptUrl {
+    const factory = (globalThis as { trustedTypes?: TrustedTypesFactory }).trustedTypes;
+
+    if (!factory) {
+        return WORKER_URL;
+    }
+
+    // Created once: a second `createPolicy` under the same name is refused by
+    // the browser unless `allow-duplicates` is present, which it deliberately
+    // is not.
+    policy ??= factory.createPolicy(WORKER_POLICY_NAME, {
+        createScriptURL: (url: string): string => {
+            if (url !== WORKER_URL) {
+                throw new InvalidParameterError(
+                    `The ${WORKER_POLICY_NAME} policy will only ever produce ${WORKER_URL}, and was ` +
+                        `asked for ${url}. It exists to load one known script, not to make URLs trusted.`,
+                );
+            }
+
+            return url;
+        },
+    });
+
+    return policy.createScriptURL(WORKER_URL);
+}
+
+const defaultFactory: WorkerFactory = () =>
+    // The one cast. `new Worker` accepts a TrustedScriptURL at runtime wherever
+    // Trusted Types exists; the DOM types in TypeScript 5.9 describe only the
+    // `string | URL` overload.
+    new Worker(workerScriptUrl() as unknown as string, { type: 'module' });
 
 /**
  * Said the same way whether the Worker refuses to construct or dies on load,

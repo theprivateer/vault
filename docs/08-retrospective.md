@@ -215,7 +215,11 @@ cheapest thing on this list and it was done last.
 a checklist cannot.
 
 **3. Build the end-to-end suite early rather than scheduling it for Phase 11.** It still does not
-exist. SR7 — key material never reaching browser storage — is verified by a source sweep and a trap
+exist — and it cost something real the day after this was written. The first deployment did not
+work: the CSP drops Trusted Types under the Vite dev server, so no test environment had ever applied
+the header that ships, and two sinks that only exist under it broke the application outright
+([F12](07-penetration-test.md)). A green suite, a green source sweep, and a product that would not
+start. SR7 — key material never reaching browser storage — is verified by a source sweep and a trap
 harness under Node, neither of which is a browser. That is honest, documented, and weaker than the
 requirement deserves. Everything about the unlock state machine, the Worker lifecycle and the wipe
 on lock would be better tested by a real page.

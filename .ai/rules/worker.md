@@ -18,3 +18,16 @@ That gap shipped a `DataCloneError` to the browser with the whole suite green: I
 Use `client.openMany()` for anything more than a single item. Each `postMessage` is a structured clone plus a task-queue hop, and at a thousand secrets the crossings cost more than the XChaCha20 does. `lib/decrypt.ts` batches at `BATCH_SIZE`.
 
 Per-item failures are returned inside the batch result, never thrown — one bad row must not blank out the batch it landed in.
+
+## The Worker constructor is a Trusted Types sink and needs its named policy
+`new Worker(url)` takes a **TrustedScriptURL**, not a string, under `require-trusted-types-for 'script'` — it is a way to make the browser fetch and run code. Without the policy the constructor throws and every page reports "encryption unavailable". This broke the first real deployment (docs/07 F12).
+
+Two halves that must stay in step:
+- `trusted-types 'vue vault-worker'` in `SecurityHeaders::BASE_DIRECTIVES`
+- `workerScriptUrl()` in `crypto/worker/client.ts`, which creates the `vault-worker` policy once
+
+**The policy accepts exactly one URL and throws on anything else.** Do not relax it to return its input — that is the `default` policy this design deliberately refuses, spelled differently. Do not add `allow-duplicates`.
+
+Note the local `TrustedScriptUrl` brand: `@types/trusted-types` is not a dependency, and there is exactly one cast, at the constructor. Keep it to one.
+
+Why no test caught it: the CSP drops Trusted Types entirely under the Vite dev server (the Vite client builds its error overlay from a string), so the shipped header is never applied in development or in the suite. Assume anything Trusted-Types-sensitive is untested until an E2E suite exists.
