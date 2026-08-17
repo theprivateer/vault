@@ -188,7 +188,17 @@ describe('a complete re-key', function () {
     it('leaves every payload ciphertext untouched', function () {
         $fixture = rekeyFixture();
 
+        /*
+         | Ordered by UUID, because the claim is about a set of ciphertexts and
+         | not about the order rows come back in. Without it this compares two
+         | maps whose keys are in whatever order the planner chose, and `toBe`
+         | on an array is order-sensitive: it passed on SQLite and on Postgres
+         | in isolation, and failed in a full Postgres run once earlier writes
+         | had rearranged the heap. A flake that only appears in CI is worse
+         | than a failure.
+         */
         $payloads = fn (): array => Secret::query()
+            ->orderBy('uuid')
             ->get()
             ->mapWithKeys(fn (Secret $secret): array => [$secret->uuid => $secret->payload_ct->base64])
             ->all();

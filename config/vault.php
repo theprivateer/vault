@@ -238,6 +238,37 @@ return [
     |
     */
 
+    /*
+    |--------------------------------------------------------------------------
+    | Operator Alerts
+    |--------------------------------------------------------------------------
+    |
+    | Where `vault:anomalies` reports to, and the thresholds it reports against.
+    | Separate from the audit anchor: the anchor's whole value is being somewhere
+    | the server does not administer, while this only has to reach whoever runs
+    | the thing. They may well be the same mailbox; they are different questions.
+    |
+    | The thresholds are deliberately dull numbers rather than anything adaptive.
+    | This is four counts over a table, and a detector that dressed that up as
+    | intelligence would be trusted further than it deserves — the server cannot
+    | read a single item any of these events refers to, so it cannot tell a busy
+    | afternoon from an exfiltration. Tune them to what this deployment is
+    | actually like; an alert that fires weekly is an alert nobody opens.
+    |
+    | Recovery-kit use and a full account export have no threshold. One is the
+    | finding: the first grants a session without the password, the second is the
+    | widest read the application allows.
+    |
+    */
+
+    'alerts' => [
+        'address' => env('VAULT_ALERT_ADDRESS', ''),
+
+        'reveals_per_day' => (int) env('VAULT_ALERT_REVEALS', 50),
+
+        'failed_sign_ins_per_day' => (int) env('VAULT_ALERT_FAILED_SIGN_INS', 20),
+    ],
+
     'audit' => [
         'anchor_address' => env('VAULT_AUDIT_ANCHOR_ADDRESS', ''),
 

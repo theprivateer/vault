@@ -838,7 +838,49 @@ reaching the browser tab through `document.title`.
    partial would be worse than one that is openly incomplete.*
 4. Monitoring: uptime, error tracking **with body scrubbing verified**, audit anomaly alerts
    (mass reads, repeated failed unlocks, recovery use).
+
+   *Built: `vault:anomalies`, daily, reporting four shapes to the operator — one person revealing
+   an unusual number of secrets, a burst of failed sign-ins, any use of a recovery kit, any full
+   export. The last two have no threshold because one occurrence is the finding. The wording says
+   outright that these are thresholds rather than conclusions: the server cannot read anything
+   these events refer to, so it cannot tell a busy afternoon from an exfiltration, and a detector
+   that implied otherwise would be muted within a month along with the alert that mattered. It
+   fails loudly when no address is configured, like `vault:audit-anchor`, for the same reason.*
+
+   *Also built: `vault:preflight`, which checks a deployment against the assumptions in these
+   documents. Every setting it reads can be wrong while the application works perfectly — that is
+   the whole category. On Postgres it also asks the database whether the `REVOKE` on
+   `audit_events` was actually applied, which is the only check here that can confirm a deployment
+   step rather than a config value.*
+
+   *Not built: error tracking itself, which needs a provider and a dependency. What is built is
+   the guarantee that would make one safe to add, plus the measurement of what is not yet true —
+   see task 5.*
 5. Log hygiene: retention, no request bodies on secret endpoints, hashed IPs.
+
+   *Built, and it found a real leak. `QueryException` composes its message by substituting the
+   bindings into the statement, so the default report of a failed secret write put the payload
+   ciphertext **and the wrapped Item Key** into `laravel.log` verbatim. The leak canary sweeps the
+   logs and did not catch it, because the canary only ever makes requests that are **rejected**;
+   this needs a request that is accepted and then fails underneath.
+   `App\Support\QueryFailureLog` logs the statement with its placeholders intact, the driver's own
+   reason and the trace, and never a value. Deliberately not a list of sensitive field names — the
+   lesson of F11 was that a list drifts and a stale one reads exactly like a current one, so the
+   rule here has nothing to keep in step: no binding is ever logged.*
+
+   *Retention: the shipped default moved from one unbounded file to `daily` at fourteen days. Not
+   housekeeping — the log is one of the stores the canary sweeps, which is a claim that it holds
+   nothing worth stealing, and the way that stops being true is a file accumulating since the day
+   the server was built.*
+
+   *Addresses were already hashed (`HMAC(APP_KEY, ip)` in `audit_events`), and there is now a test
+   that a distinctive address appears in neither the log nor the table.*
+
+   *Measured and left alone: `zend.exception_ignore_args`. With it off, exceptions collect every
+   frame's arguments — but `getTraceAsString()` truncates strings to 15 characters regardless, so
+   the log file is safe either way. What is not safe is an error tracker, which serialises
+   `getTrace()` with the values intact. `vault:preflight` warns about it and says it becomes a
+   failure on the day a tracker is added.*
 6. Operator runbook: onboarding a user, rotating a compromised key, restoring from backup,
    responding to a suspected server compromise.
 7. `README.md` rewrite, and a walkthrough of the cryptographic design for a reader who is

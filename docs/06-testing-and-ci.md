@@ -394,6 +394,7 @@ Every gate listed as running blocks merge, across five jobs in `.github/workflow
 | **Storage and DOM sinks** | `security.test.ts` (SR7) — a source sweep and a trap harness | running, inside the Vitest suite |
 | **Timing parity** | `Auth/TimingTest.php` (SR6) — hash-operation counts, not a clock | running, inside the PHP suite |
 | **Rate limits** | `RateLimitTest.php` — sweeps the route table for anything unlimited | running, inside the PHP suite |
+| **Nothing in a log** | `LogHygieneTest.php` — a request that is *accepted* and then fails underneath | running, inside the PHP suite |
 | TS types | `vue-tsc --noEmit` | running |
 | JS lint | ESLint, including `no-restricted-imports` keeping the crypto module app-free | running |
 | JS format | `prettier --check` | running |
@@ -432,6 +433,19 @@ rule. A shell grep cannot tell a call from a prose sentence about calls. The sec
 which also asserts that its own patterns would still fire if a real call were added. It runs twice
 on purpose: once inside the backend suite, and once as a named job so a failure of the single most
 important rule here is a red check with the rule's name on it.
+
+**The leak canary has a blind spot, and `LogHygieneTest` is what covers it.** The canary makes
+requests that are **rejected** — a malformed payload, a bad UUID — and sweeps for the sentinel
+afterwards. It never makes a well-formed request that fails *underneath* the application, which is a
+different code path entirely: the framework composes the log entry rather than the application, and
+`QueryException` composes its message by substituting the bindings into the statement. So a failed
+secret write wrote the payload ciphertext and the wrapped Item Key into `laravel.log` in full, with
+the canary green, for as long as that path has existed. The fix is in
+[05 § Phase 12](05-implementation-plan.md); the test forces the failure at the INSERT by dropping a
+single column, because dropping the whole table fails during *validation* instead and proves
+nothing. It carries a self-test in the canary's own style, asserting that the message the framework
+would have written does contain the ciphertext — so the main assertion cannot quietly become a
+tautology.
 
 ## Deliberately not tested
 

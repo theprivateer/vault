@@ -3,6 +3,8 @@
 use App\Http\Middleware\ForgetFlashedInput;
 use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Middleware\SecurityHeaders;
+use App\Support\QueryFailureLog;
+use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -45,6 +47,24 @@ return Application::configure(basePath: dirname(__DIR__))
         $exceptions->shouldRenderJsonWhen(
             fn (Request $request) => $request->is('api/*') || $request->expectsJson(),
         );
+
+        /*
+         | A failed query is logged without its bindings (Phase 12, task 5).
+         |
+         | `QueryException`'s message interpolates the values into the statement,
+         | so the default report of a failed secret write put the payload
+         | ciphertext and the wrapped Item Key straight into a log file. Found by
+         | measurement rather than review — the leak canary sweeps logs, but it
+         | only exercises requests that are *rejected*, and this needs a request
+         | that is accepted and then fails underneath.
+         |
+         | Returning false stops the framework logging it again with the message
+         | this replaces. See App\Support\QueryFailureLog, and
+         | tests/Feature/LogHygieneTest.php.
+         */
+        $exceptions->report(function (QueryException $exception): bool {
+            return QueryFailureLog::record($exception);
+        });
 
         /*
          | There is deliberately no `dontFlash()` list here.

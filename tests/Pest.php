@@ -1,9 +1,14 @@
 <?php
 
+use App\Enums\VaultRole;
+use App\Models\Lockbox;
 use App\Models\User;
 use App\Models\UserIdentity;
 use App\Models\UserKeyWrap;
+use App\Models\Vault;
+use Database\Factories\EnvelopeFixtures;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Str;
 use Illuminate\Testing\TestResponse;
 use Tests\TestCase;
 
@@ -141,6 +146,31 @@ function payloadString(array $payload, string $key): string
     }
 
     return $value;
+}
+
+/**
+ * A vault the given user owns, and a lockbox inside it they may write to.
+ *
+ * Shared rather than local to one file for the same reason `recoverableAccount`
+ * is: two files need it, and two copies that drifted would let both pass while
+ * describing different setups. The membership is created explicitly rather than
+ * left to a factory state, because a vault without one is unreachable by anybody
+ * — the Vault Key exists only as the sealed copy on that row.
+ */
+function writableLockbox(User $user): Lockbox
+{
+    $vault = Vault::factory()->create(['owner_id' => $user->getKey()]);
+
+    $vault->memberships()->create([
+        'uuid' => (string) Str::uuid7(),
+        'user_id' => $user->getKey(),
+        'role' => VaultRole::Owner,
+        'wrapped_vault_key' => EnvelopeFixtures::sealedEnvelope(),
+        'key_epoch' => $vault->key_epoch,
+        'accepted_at' => now(),
+    ]);
+
+    return Lockbox::factory()->create(['vault_id' => $vault->getKey()]);
 }
 
 /**

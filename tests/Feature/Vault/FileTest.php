@@ -1,7 +1,5 @@
 <?php
 
-use App\Enums\VaultRole;
-use App\Models\Lockbox;
 use App\Models\User;
 use App\Models\Vault;
 use App\Models\VaultFile;
@@ -44,23 +42,6 @@ function filePayload(array $overrides = []): array
         'chunk_count' => 3,
         ...$overrides,
     ];
-}
-
-/** A vault the given user can write to, and a lockbox inside it. */
-function writableLockbox(User $user): Lockbox
-{
-    $vault = Vault::factory()->create(['owner_id' => $user->getKey()]);
-
-    $vault->memberships()->create([
-        'uuid' => (string) Str::uuid7(),
-        'user_id' => $user->getKey(),
-        'role' => VaultRole::Owner,
-        'wrapped_vault_key' => EnvelopeFixtures::sealedEnvelope(),
-        'key_epoch' => $vault->key_epoch,
-        'accepted_at' => now(),
-    ]);
-
-    return Lockbox::factory()->create(['vault_id' => $vault->getKey()]);
 }
 
 describe('creating a file row', function () {

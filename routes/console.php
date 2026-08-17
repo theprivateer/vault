@@ -30,6 +30,19 @@ Schedule::command('vault:audit-anchor')->dailyAt('06:00')->withoutOverlapping();
 Schedule::command('vault:audit-verify')->dailyAt('05:45')->withoutOverlapping();
 
 /*
+ | Unusual shapes in the audit log, reported to the operator (Phase 12, task 4).
+ |
+ | After the anchor and the verification, so a day's report is composed from a
+ | chain that has already been checked — an anomaly report drawn from a log that
+ | does not verify would be describing something that may not have happened.
+ |
+ | Daily rather than hourly on purpose. Every threshold here is a count over a
+ | day, and an hourly job would either need different numbers or would send the
+ | same finding twenty-four times.
+ */
+Schedule::command('vault:anomalies')->dailyAt('06:15')->withoutOverlapping();
+
+/*
  | Abandoned uploads and purged file bodies (Phase 6). Overnight, because it
  | deletes and the grace periods are measured in hours and days.
  */

@@ -161,6 +161,14 @@ this server. An encrypted backup that only its own application can read is not a
 the half of D3 that makes "there is no password reset" a defensible thing to say rather than a
 hostage note.
 
+Also built for Phase 12: the suite now runs against **Postgres** as well as SQLite, which caught a
+`HAVING` clause that works on one and throws on the other; `vault:preflight`, which checks a
+deployment against the assumptions these documents make, including asking the database whether the
+`REVOKE` on `audit_events` was actually applied; `vault:anomalies`, a daily report to the operator
+covering mass reveals, failed sign-in bursts, recovery-kit use and full exports; and a fix for a
+real leak — a failed query used to write its bindings into the log, which on a secret write meant
+the payload ciphertext and the wrapped Item Key in plain sight.
+
 ## Stack
 
 - **Backend** — Laravel 13, PHP 8.4 with `ext-sodium`, Pest 5, Larastan at max level
