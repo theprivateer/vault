@@ -178,6 +178,15 @@ The server necessarily learns:
   out of access logs — a requirement no application-level control could satisfy if the token were in
   the request line. A link's *opening* is recorded with no actor, because there is none: the
   recipient has no account, and all that is known of them is a keyed hash of their address.
+- **That somebody took a full copy, and how big it was** — new with the export in
+  [05 § Phase 12](05-implementation-plan.md). `account.exported` records the act with three counts:
+  vaults, secrets and files. None of it is information the server lacked — the rows were already
+  countable and the same ciphertext is served by the vault pages one at a time — but gathering it
+  into a single request makes the *act* legible in a way a scatter of ordinary reads is not, and
+  that is deliberate rather than conceded. An export is the widest read the application allows and
+  the one an operator should be able to find when reviewing a suspected compromise. What the server
+  does not learn is the other half: whether any of it decrypted, which is a fact only the browser
+  ever holds, and the client is not asked to report back.
 - **Handles** — the identity directory confirms whether a handle exists to any signed-in user.
   Sharing by handle requires exactly that lookup, and D11 scopes the system to a small invited
   group where the member list is not the secret.

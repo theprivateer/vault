@@ -8,11 +8,12 @@ Before planning or editing, find the row whose globs match the file's path and r
 | app/Http/Controllers/Auth/KdfUpgradeController.php, app/Http/Controllers/Auth/** | .ai/rules/auth.md |
 | bootstrap/app.php | .ai/rules/bootstrap.md |
 | config/** | .ai/rules/config.md |
-| app/Http/Controllers/SecretController.php, app/Http/Controllers/VaultRekeyController.php, app/Http/Controllers/FileChunkController.php, app/Http/Controllers/ShareLinkController.php, app/Http/Controllers/VaultOwnershipController.php, app/Http/Controllers/VaultController.php, app/Http/Controllers/IdentityRotationController.php, app/Http/Controllers/VaultResealController.php | .ai/rules/controllers.md |
-| resources/js/crypto/**, resources/js/crypto/padding.ts, resources/js/crypto/grant.ts, resources/js/crypto/chunks.ts, resources/js/crypto/audit.ts, resources/js/crypto/envelope.ts, resources/js/crypto/rotation.ts | .ai/rules/crypto.md |
+| app/Http/Controllers/SecretController.php, app/Http/Controllers/VaultRekeyController.php, app/Http/Controllers/FileChunkController.php, app/Http/Controllers/ShareLinkController.php, app/Http/Controllers/VaultOwnershipController.php, app/Http/Controllers/VaultController.php, app/Http/Controllers/IdentityRotationController.php, app/Http/Controllers/VaultResealController.php, app/Http/Controllers/AccountExportController.php | .ai/rules/controllers.md |
+| resources/js/crypto/**, resources/js/crypto/padding.ts, resources/js/crypto/grant.ts, resources/js/crypto/chunks.ts, resources/js/crypto/audit.ts, resources/js/crypto/envelope.ts, resources/js/crypto/rotation.ts, resources/js/crypto/archive.ts | .ai/rules/crypto.md |
+| resources/js/decryptor/** | .ai/rules/decryptor.md |
 | docs/**, docs/05-implementation-plan.md | .ai/rules/docs.md |
 | resources/js/** | .ai/rules/js.md |
-| resources/js/lib/**, resources/js/lib/sharing.ts, resources/js/lib/files.ts, resources/js/lib/generate.ts, resources/js/lib/secretTypes.ts | .ai/rules/lib.md |
+| resources/js/lib/**, resources/js/lib/sharing.ts, resources/js/lib/files.ts, resources/js/lib/generate.ts, resources/js/lib/secretTypes.ts, resources/js/lib/export.ts | .ai/rules/lib.md |
 | app/Http/Middleware/SecurityHeaders.php | .ai/rules/middleware.md |
 | database/migrations/** | .ai/rules/migrations.md |
 | app/Models/VaultMembership.php | .ai/rules/models.md |

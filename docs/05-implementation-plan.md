@@ -813,6 +813,16 @@ reaching the browser tab through `document.title`.
 3. **Full client-side export** to an encrypted archive and to plaintext JSON with a deliberately
    heavy warning. Non-negotiable for a tool that can permanently lose your data — and it is what
    makes D3's "no recovery path" ethically defensible.
+
+   *Built. The format is specified in
+   [03 § Export archive](03-cryptographic-design.md#export-archive), and it ships with a
+   **standalone offline decryptor** — one self-contained HTML file, built from the same
+   `crypto/archive.ts` the export uses, carrying its own `default-src 'none'` policy so it cannot
+   make a network request whatever its script does. That pairing is the point rather than a
+   flourish: an archive openable only by the application whose disappearance it insures against is
+   not a backup. Attachment bodies are inlined up to 25 MiB and anything beyond that is listed by
+   name, size and hash — an export says what it does not contain, because one that was quietly
+   partial would be worse than one that is openly incomplete.*
 4. Monitoring: uptime, error tracking **with body scrubbing verified**, audit anomaly alerts
    (mass reads, repeated failed unlocks, recovery use).
 5. Log hygiene: retention, no request bodies on secret endpoints, hashed IPs.

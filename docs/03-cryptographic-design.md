@@ -731,6 +731,56 @@ hardenings, both real and neither a solution:
   comes entirely from the anchor being *elsewhere* — an address the same server administers proves
   nothing.
 
+### Export archive
+
+The one artefact here designed to be read **without this application**. Everything else assumes a
+running server and a browser that fetched its code from it; an archive assumes neither, because the
+case it exists for is the server being gone.
+
+```
+┌──────────┬─────┬─────┬────────┬────────┬────────┬──────────┬──────────┬──────────┐
+│ "VAULTARC"│ ver │ kdf │ m      │ t      │ p      │ salt     │ uuid     │ envelope │
+│ 8 bytes  │  1  │  1  │ 4 (BE) │ 4 (BE) │ 4 (BE) │ 16 bytes │ 36 ASCII │ variable │
+└──────────┴─────┴─────┴────────┴────────┴────────┴──────────┴──────────┴──────────┘
+
+  stretched = Argon2id(passphrase, salt, m, t, p, dkLen = 64)
+  key       = HKDF-SHA256(ikm = stretched[0..32], salt = header, info = "vault:export:archive:v1")
+  body      = envelope(key, document, aad = {export.archive, uuid, version})
+```
+
+Four decisions worth stating:
+
+- **Every parameter is in the file.** A format whose costs live only in the code that wrote it dies
+  with that code. The header is self-describing so that a stranger with a hex editor and this
+  section can derive the key, and so that raising the parameters later leaves existing archives
+  readable at whatever they were made with.
+
+- **The header is bound through the key rather than through the AAD.** The entire header is the
+  HKDF salt, so editing any byte of it — magic, version, KDF identifier, costs, salt, UUID —
+  produces a different key. The alternative was widening `seal`'s parameter type for one caller and
+  relying on somebody remembering to extend the binding each time the header grew a field. This way
+  a field added at version 2 is covered on the day it is added.
+
+- **The parameters are deliberately harder than a login: 256 MiB, t=4.** Account parameters are a
+  compromise with somebody standing at a login form several times a day; an archive is opened once,
+  and is the artefact most likely to sit on a USB stick in a drawer, offline and attackable at
+  leisure. **Measured at 3.97 s on an Apple M1** against 731 ms for the login parameters — four
+  seconds once is a good trade where four seconds every morning is not.
+
+- **A passphrase separate from the master password**, with a 12-character floor. The archive should
+  stay readable after that password changes and after the account no longer exists, which it cannot
+  do if it is derived from it.
+
+**The decryptor is part of the format, not a convenience.** `npm run build:decryptor` produces one
+self-contained HTML file — no external references, everything inlined — carrying its own
+`default-src 'none'` policy, so it cannot make a network request whatever its script does. It is
+built from `crypto/archive.ts` rather than reimplementing it, so there is one implementation in the
+repository and no second copy to drift. An encrypted backup that only its own application can open
+is not a backup.
+
+What the archive is not: a restore. There is no import (D12), and nothing here reconstructs an
+account from a file. It is a copy you hold, in a format you can read.
+
 ## Key handling in memory
 
 - All key material lives in a **dedicated crypto Web Worker**. The main thread holds opaque

@@ -5,6 +5,7 @@ paths:
   - resources/js/lib/files.ts
   - resources/js/lib/generate.ts
   - resources/js/lib/secretTypes.ts
+  - resources/js/lib/export.ts
 ---
 
 # Lib
@@ -54,4 +55,14 @@ Two invariants, asserted as loops in secretTypes.test.ts:
 
 `unmappedFields` must keep working: old payloads (every `card` written when cards were one `value` box) and payloads from later builds have to render, and the form carries them through an edit untouched. Dropping what you cannot display turns "we can't show this" into "this is gone".
 
-Padding note: fixed field sets cluster serialised sizes, so the bucket now hints at an item's kind. Recorded in docs/02 § Accepted leakage. Keep writing the type's full key set so items of one type differ only by contents.
+Padding note: fixed field sets cluster serialised sizes, so the bucket is a weak hint at an item's kind. Measured, in docs/02 § Accepted leakage — only `server` is ever alone in a bucket, and 200 characters of notes collapses all twelve into one. **`buildPayload` drops empty fields and must keep doing so**; writing the full key set would make items of one type uniform, and uniformity tightens each type's size range, which is what makes types separable. Full reasoning in the crypto.md rule on padding.
+
+## An export copies payloads verbatim and names everything it left out
+This file may be the last copy of somebody's data, so two rules override tidiness:
+
+1. **The payload goes in as it came out of the decrypt.** Never reassemble it from the fields secretTypes.ts recognises — a key written by a later build would vanish, in the one file nobody is going to diff. Same reasoning as `unmappedFields`, with worse consequences.
+2. **Nothing is omitted silently.** `standardOmissions()` and each file's `omitted` string are the mechanism. `FilePlan` is a union rather than `{inline: boolean, reason?: string}` precisely so "left out" cannot exist without its reason.
+
+Failures are recorded per item, never thrown. An export that abandons the run because one secret does not verify fails exactly the person who most needs one — somebody whose data is already partly damaged.
+
+Version history is excluded on purpose, not for effort: superseded payloads are credentials that were rotated because they leaked, a vault expires them on a schedule, and a file has no retention policy. Say so in `standardOmissions()` if the wording ever changes.

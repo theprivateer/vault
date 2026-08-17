@@ -41,6 +41,7 @@ export const AAD_CONTEXTS = [
     'user.privkey.ed25519',
     'user.pins',
     'sharelink.payload',
+    'export.archive',
 ] as const;
 
 export type AadContext = (typeof AAD_CONTEXTS)[number];

@@ -116,6 +116,21 @@ useDocumentTitle('How this is secured');
                         More on why there is no password reset
                     </Link>
                 </p>
+
+                <!--
+                    The counterweight, and it belongs on this page rather than
+                    only in a menu. "The data is gone" is only a defensible thing
+                    to say to somebody who was always free to leave with a copy.
+                -->
+                <p>
+                    Which is why you can take all of it out at any time, decrypted in your browser and written
+                    to a file — either as plaintext, or as an archive under a passphrase of your choosing that
+                    comes with a small offline program to open it. Neither needs this server to exist
+                    afterwards.
+                    <Link href="/account/export" class="text-accent underline underline-offset-2">
+                        Export everything
+                    </Link>
+                </p>
             </section>
 
             <section class="space-y-3">

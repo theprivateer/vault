@@ -7,6 +7,7 @@ paths:
   - resources/js/crypto/audit.ts
   - resources/js/crypto/envelope.ts
   - resources/js/crypto/rotation.ts
+  - resources/js/crypto/archive.ts
 ---
 
 # Crypto
@@ -82,3 +83,12 @@ Measured: dropping leaves 11 of 12 types able to produce a 128-byte payload; wri
 Also measured, so nobody re-litigates it: only `server` is ever alone in a bucket (fully populated, empty note). `address` never is, despite having the most fields. 200 characters of notes collapses all twelve types into one bucket — content dominates schema.
 
 Pinned by secretTypes.test.ts ("omits empty fields rather than writing them as empty strings"). Numbers in docs/02 § Accepted leakage.
+
+## An archive is self-describing, and its header is bound through the key
+The header carries magic, version, KDF id, m/t/p, salt and UUID because an archive has to be openable when this application is gone — a format whose parameters live only in the code that wrote it dies with that code.
+
+The whole header is the HKDF salt (argon2id → HKDF(salt = header, info = "vault:export:archive:v1")), NOT an AAD field. So any byte added to the header at version 2 is bound on the day it is added, with nobody remembering to extend anything. Do not "simplify" this to a single Argon2id call — that would conflate "make this expensive" with "bind this to its context" and stop the salt being a salt.
+
+ARCHIVE_KDF_PARAMS is 256 MiB / t=4, harder than a login on purpose: an archive is opened once and sits offline where it can be attacked at leisure. Measured 3.97 s on an M1 against 731 ms for login params. The `params` argument exists so tests can run cheap and so the cost can be raised; nothing in the UI passes it and nothing should offer a way to lower it.
+
+readArchiveHeader bounds m/t/p. Not a security control — a lowered parameter already fails, since it feeds the key — but one flipped byte turns 8 KiB into four terabytes, and without the bound that surfaces as an allocation failure inside Argon2id seconds after the passphrase was typed.

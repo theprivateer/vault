@@ -77,11 +77,12 @@ Read in this order:
 
 ## Status
 
-Phases 0–11 of [thirteen](docs/05-implementation-plan.md) are complete: a working zero-knowledge
-vault that can be shared with other people and taken back, holds encrypted attachments, keeps a
-tamper-evident log of what happened in it, remembers what its secrets used to say, can hand a single
-credential to somebody who has no account at all, treats key rotation as a routine operation rather
-than an emergency one, and has been attacked on purpose with the results
+Phases 0–11 and 13 of [thirteen](docs/05-implementation-plan.md) are complete: a working
+zero-knowledge vault that can be shared with other people and taken back, holds encrypted
+attachments, keeps a tamper-evident log of what happened in it, remembers what its secrets used to
+say, can hand a single credential to somebody who has no account at all, treats key rotation as a
+routine operation rather than an emergency one, lets you leave with everything in a file it cannot
+read, and has been attacked on purpose with the results
 [written down](docs/07-penetration-test.md).
 
 - **Phase 0** — Inertia + Vue + TypeScript strict, a nonce-based CSP enforced from the first
@@ -145,8 +146,20 @@ than an emergency one, and has been attacked on purpose with the results
   product at `/security` rather than only in this repository — because a threat model only its
   author reads is a document for people who were already going to trust it.
 
-Next is [Phase 12](docs/05-implementation-plan.md#phase-12--operations--release): operations and
-release.
+- **Phase 13** — typed secrets: twelve kinds of item whose fields differ, driven by one declarative
+  table rather than twelve bespoke forms. That shape is the decision — it converts "no credential
+  field is searchable" and "nothing renders unmasked" from properties a reviewer checks by eye into
+  loops over a table. Old payloads still render, including every `card` written when a card was one
+  free-text box, and an edit carries through fields this build has never heard of rather than
+  dropping what it cannot display.
+
+**Phase 12** — operations and release — is underway. Built so far: **a full client-side export**, to
+an encrypted archive and to plaintext JSON that leads with a warning about what it is. The archive
+ships with a standalone offline decryptor: one HTML file with everything inlined and a
+`default-src 'none'` policy of its own, so it opens an archive on a machine that has never heard of
+this server. An encrypted backup that only its own application can read is not a backup, and this is
+the half of D3 that makes "there is no password reset" a defensible thing to say rather than a
+hostage note.
 
 ## Stack
 
@@ -186,6 +199,14 @@ npm run build:worker    # after changing anything in resources/js/crypto
 
 That is a deliberate trade. The one part of this codebase that should never be swapped out
 invisibly is the part holding the keys.
+
+The offline archive decryptor is built the same way, to a single self-contained HTML file:
+
+```bash
+npm run build:decryptor    # → public/build/vault-decryptor.html
+```
+
+`npm run build` runs all three.
 
 ## Development
 

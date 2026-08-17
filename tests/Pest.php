@@ -103,6 +103,31 @@ function jsonString(TestResponse $response, string $key): string
 }
 
 /**
+ * Reads an array out of a JSON response.
+ *
+ * The companion to `jsonString`, and it exists for the same reason: a response
+ * key is `mixed`, so every reader either checks the shape or quietly indexes
+ * into something that is not there. Checking once here means a malformed
+ * response fails as "that key is not an array" rather than as a run of confusing
+ * assertions about missing offsets.
+ *
+ * @template TResponse of \Symfony\Component\HttpFoundation\Response
+ *
+ * @param  TestResponse<TResponse>  $response
+ * @return array<array-key, mixed>
+ */
+function jsonArray(TestResponse $response, string $key): array
+{
+    $value = $response->json($key);
+
+    if (! is_array($value)) {
+        throw new InvalidArgumentException("Response key [{$key}] is not an array.");
+    }
+
+    return $value;
+}
+
+/**
  * Reads a string from a test payload array.
  *
  * @param  array<string, mixed>  $payload

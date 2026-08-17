@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\AccountExportController;
 use App\Http\Controllers\AuditEventController;
 use App\Http\Controllers\Auth\KdfParamsController;
 use App\Http\Controllers\Auth\KdfUpgradeController;
@@ -250,6 +251,25 @@ Route::middleware(['auth', 'throttle:authenticated'])->group(function (): void {
         ->name('users.identity');
 
     Route::post('/account/pins', [PinStoreController::class, 'update'])->name('pins.update');
+
+    /*
+     | Taking everything out (Phase 12, task 3).
+     |
+     | The data route carries its own limiter, stricter than the group's. It is
+     | the widest read in the application — every ciphertext the caller can
+     | decrypt, in one response — so it is both the most expensive request to
+     | serve and the one whose repetition is most worth noticing. Six an hour is
+     | generous for a deliberate act and useless as a scraping loop.
+     |
+     | It is a GET, and there is a real argument that a request with this much
+     | consequence should be a POST. It stays a GET because it reads and changes
+     | nothing; the audit entry is the record that it happened, and forcing a
+     | verb change to express severity would be dressing a read up as a write.
+     */
+    Route::get('/account/export', [AccountExportController::class, 'create'])->name('export.create');
+    Route::get('/account/export/data', [AccountExportController::class, 'data'])
+        ->middleware('throttle:6,60')
+        ->name('export.data');
 
     Route::get('/lockboxes/{lockbox}', [LockboxController::class, 'show'])
         ->middleware('can:view,lockbox')

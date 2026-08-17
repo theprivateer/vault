@@ -50,6 +50,20 @@ enum AuditAction: string
      */
     case IdentityRotated = 'auth.identity_rotated';
 
+    /**
+     * The whole account read out at once (Phase 12, task 3).
+     *
+     * The single most sensitive read this application allows, and therefore the
+     * one entry an operator should be able to find without knowing to look for
+     * it. Recorded against the user rather than any vault, because that is the
+     * scope of it: every vault they hold a key to, in one request.
+     *
+     * The server sees the request, not the result. `vaults` counts what was
+     * handed over; whether any of it decrypted is a fact only the browser
+     * learned, and it is not asked to report back.
+     */
+    case AccountExported = 'account.exported';
+
     case VaultCreated = 'vault.created';
     case VaultUpdated = 'vault.updated';
     case VaultDeleted = 'vault.deleted';
@@ -179,6 +193,7 @@ enum AuditAction: string
             self::TotpDisabled => 'turned off two-factor authentication',
             self::KdfUpgraded => 'had their password stretching upgraded',
             self::IdentityRotated => 'replaced their identity keys',
+            self::AccountExported => 'exported every vault they can read',
             self::VaultCreated => 'created this vault',
             self::VaultUpdated => 'renamed this vault',
             self::VaultDeleted => 'deleted this vault',

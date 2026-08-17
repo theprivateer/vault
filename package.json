@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "vite build && npm run build:worker",
+    "build": "vite build && npm run build:worker && npm run build:decryptor",
     "dev": "npm run build:worker && vite",
     "types": "vue-tsc --noEmit",
     "lint": "eslint .",
@@ -14,7 +14,8 @@
     "bench:vault": "vitest run --config vitest.bench.config.ts --disable-console-intercept",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "build:worker": "vite build --config vite.worker.config.ts"
+    "build:worker": "vite build --config vite.worker.config.ts",
+    "build:decryptor": "vite build --config vite.decryptor.config.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

@@ -8,6 +8,7 @@ paths:
   - app/Http/Controllers/VaultController.php
   - app/Http/Controllers/IdentityRotationController.php
   - app/Http/Controllers/VaultResealController.php
+  - app/Http/Controllers/AccountExportController.php
 ---
 
 # Controllers
@@ -84,3 +85,10 @@ The plaintext does not change, so nothing may behave as though it did — no ver
 Deliberately **not** atomic, unlike the re-key: both envelope versions open, so each row is correct on its own and a half-finished pass leaves nothing to repair. That is what lets it batch and resume; do not "fix" it into an all-or-nothing submission.
 
 `secret_versions` is absent from `ResealTarget` and must stay absent — an archive that could be rewritten is a rollback channel for a credential rotated because it leaked. Guarded by tests/Feature/Vault/ResealTest.php.
+
+## The export endpoint is authorised by the shape of its query
+There is no route parameter, so there is no `can:` middleware to attach — which makes this the one vault-reading endpoint whose authorisation lives entirely in how the query is written. It starts at the caller's live membership rows (same as VaultController::index), so a vault they have no row for cannot appear in the result. Never rewrite it as a `whereIn` over vault ids or a join from `vaults`: that moves the access decision from a relationship into a list somebody has to get right.
+
+Trashed vaults, lockboxes and secrets are excluded. The 30-day grace period is a property of this server and a file on a USB stick cannot honour it, so an archive that reintroduced deleted credentials would be a surprise in the wrong direction.
+
+`account.exported` is recorded *before* the response is built. Logging it after the bytes are out would make the widest read in the application the one read that can be made not to appear, by cutting the connection.

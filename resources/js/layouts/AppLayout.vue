@@ -74,6 +74,7 @@ function signOutNow(): void {
                     <Link href="/account/links" class="text-muted hover:text-ink">links</Link>
                     <Link href="/account/activity" class="text-muted hover:text-ink">activity</Link>
                     <Link href="/account/identity" class="text-muted hover:text-ink">keys</Link>
+                    <Link href="/account/export" class="text-muted hover:text-ink">export</Link>
                     <Link href="/account/two-factor" class="text-muted hover:text-ink">account</Link>
 
                     <button

@@ -81,6 +81,16 @@ final class AuditMetadata
          *  lockbox. A count, never a list of names. */
         'count' => 'int',
 
+        /** The size of an export: how many vaults, secrets and files were
+         *  handed over. Counts and nothing else, and they are what makes an
+         *  export readable in the log years later — "took everything, on a
+         *  Tuesday, and it was 4 vaults" answers the question somebody
+         *  reviewing a suspected compromise is actually asking. A list of what
+         *  was in it would not be admissible and is not offered. */
+        'vault_count' => 'int',
+        'secret_count' => 'int',
+        'file_count' => 'int',
+
         /** The Argon2id parameters an account was moved to. Already plaintext
          *  columns on `users`, identical for any two accounts on the same
          *  deployment defaults, and the only way to read "was this account
