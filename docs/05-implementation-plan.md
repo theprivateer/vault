@@ -889,6 +889,14 @@ reaching the browser tab through `document.title`.
    would change, and what surprised you. This is the deliverable that makes the project pay back
    as a learning exercise rather than just a working app.
 
+   *Written: [08 — Retrospective](08-retrospective.md). The finding that surprised me most is that
+   none of the real defects were in the cryptography — the crypto core has never been the source of
+   one — and that almost every list of dangerous things this project reached for turned out to be
+   the wrong shape, because a denylist fails open and a stale one reads exactly like a current one.
+   It also records the worst thing I did here: a mitigation written confidently into three
+   documents that was backwards, next to code that was right, which needed a question from outside
+   and twenty minutes of measurement to catch.*
+
 ### Exit criteria
 
 Deployed, monitored, backed up, restore-tested, exportable, documented.

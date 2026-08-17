@@ -73,6 +73,7 @@ Read in this order:
 | [04 — Data Model](docs/04-data-model.md) | Schema, and what each unencrypted column leaks |
 | [05 — Implementation Plan](docs/05-implementation-plan.md) | Thirteen phases, each with deliverables and exit criteria |
 | [06 — Testing & CI](docs/06-testing-and-ci.md) | The four tests that matter most, and the CI gates |
+| [08 — Retrospective](docs/08-retrospective.md) | What the zero-knowledge constraint cost, and what I would change |
 | [adr/](docs/adr/) | Decision records — what was chosen, and what was rejected |
 
 ## Status

@@ -17,6 +17,7 @@ ciphertext and wrapped keys, and never holds a key capable of decrypting them.**
 | [05 — Implementation Plan](05-implementation-plan.md) | **The phases.** 13 phases, each with deliverables and exit criteria |
 | [06 — Testing & CI](06-testing-and-ci.md) | Test strategy, the leak canary, CI gates |
 | [07 — Penetration Test](07-penetration-test.md) | The self-directed test: every finding, its fix, and what was deliberately left |
+| [08 — Retrospective](08-retrospective.md) | What zero-knowledge cost, what surprised me, and what I would do differently |
 | [adr/](adr/) | Decision records — why a choice was made, and what was rejected |
 
 ## The one-paragraph summary
