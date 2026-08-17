@@ -202,6 +202,12 @@ The sweep that found two dropped work items found them because phases 5–11 eac
 unaudited half. A task list with ticks cannot show you the clause that got dropped mid-sentence —
 "and email notification", in task 9 of Phase 2, was simply never built and nothing recorded it.
 
+A third arrived later, from the same half and found the same way the rest of this document predicts:
+by somebody using the thing. Phase 3 task 6 asked for "create/edit forms", secrets got the edit half
+and the containers did not, so a vault or lockbox could be named once and never corrected — while
+both `PATCH` endpoints sat there routed, authorised, audited, uncalled and untested. Three for
+three, all from the phases with no carried-forward prose.
+
 ---
 
 ## What I would do differently

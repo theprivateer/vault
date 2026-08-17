@@ -13,6 +13,7 @@ import { computed, ref, watch } from 'vue';
 
 import NoticePanel from '@/components/NoticePanel.vue';
 import RetentionSettings from '@/components/RetentionSettings.vue';
+import VaultDetails from '@/components/VaultDetails.vue';
 import ShareVault from '@/components/ShareVault.vue';
 import TextField from '@/components/TextField.vue';
 import AppLayout from '@/layouts/AppLayout.vue';
@@ -20,7 +21,13 @@ import { fingerprintHex } from '@/crypto/grant';
 import { computeFingerprint } from '@/crypto/identity';
 import { fromBase64 } from '@/lib/bytes';
 import { describeError } from '@/lib/errors';
-import { sealItem, type LockboxRecord, type SecretRecord, type VaultRecord } from '@/lib/items';
+import {
+    sealItem,
+    type LockboxPayload,
+    type LockboxRecord,
+    type SecretRecord,
+    type VaultRecord,
+} from '@/lib/items';
 import { checkMembership, type MembershipRecord } from '@/lib/sharing';
 import { uuid7 } from '@/lib/uuid';
 import { usePins } from '@/stores/pins';
@@ -55,6 +62,21 @@ const name = ref('');
 const description = ref('');
 const createFailure = ref('');
 const deleteFailure = ref('');
+
+/*
+ | Renaming a lockbox, inline in the list.
+ |
+ | `PATCH /lockboxes/{lockbox}` shipped in Phase 3 and nothing had ever called
+ | it — the same gap as the vault's own name, found the same way. Inline rather
+ | than on the lockbox's own page because the list is where somebody notices the
+ | typo, and one row at a time because two open editors would need two drafts
+ | and there is no reason to want that.
+ */
+const renaming = ref<string | null>(null);
+const renameName = ref('');
+const renameDescription = ref('');
+const renameFailure = ref('');
+const renameSaving = ref(false);
 
 const canWrite = computed(() => props.vault.membership.role !== 'viewer');
 const isOwner = computed(() => props.vault.membership.role === 'owner');
@@ -184,6 +206,57 @@ async function create(): Promise<void> {
             },
             onError: (errors) => {
                 createFailure.value = Object.values(errors)[0] ?? 'The lockbox could not be saved.';
+            },
+        },
+    );
+}
+
+/** Opens the inline editor for one lockbox, prefilled from its plaintext. */
+function startRename(uuid: string, payload: LockboxPayload | null): void {
+    renaming.value = uuid;
+    renameName.value = payload?.name ?? '';
+    renameDescription.value = payload?.description ?? '';
+    renameFailure.value = '';
+}
+
+/**
+ * A rename is a re-encryption, not a metadata edit.
+ *
+ * The name is inside `payload_ct`, so this seals the whole payload again under a
+ * fresh Item Key — exactly what an edit to a secret does, and for the same
+ * reason. The server has never seen a lockbox's name and has no field to change.
+ */
+async function saveRename(record: LockboxRecord): Promise<void> {
+    renameFailure.value = '';
+    renameSaving.value = true;
+
+    let sealed;
+
+    try {
+        sealed = await sealItem(crypto(), props.vault.uuid, 'lockbox.payload', record.uuid, {
+            name: renameName.value,
+            description: renameDescription.value,
+        });
+    } catch (error) {
+        renameFailure.value = describeError(error, 'The lockbox could not be encrypted.');
+        renameSaving.value = false;
+
+        return;
+    }
+
+    router.patch(
+        `/lockboxes/${record.uuid}`,
+        { ...sealed },
+        {
+            preserveScroll: true,
+            onSuccess: () => {
+                renaming.value = null;
+            },
+            onError: (errors) => {
+                renameFailure.value = Object.values(errors)[0] ?? 'The lockbox could not be saved.';
+            },
+            onFinish: () => {
+                renameSaving.value = false;
             },
         },
     );
@@ -375,18 +448,68 @@ useDocumentTitle(() => contents.value.vault?.payload?.name ?? 'Vault');
                     {{ entry.error }}
                 </NoticePanel>
 
-                <Link v-else :href="`/lockboxes/${entry.record.uuid}`" class="flex justify-between gap-4">
-                    <span>
-                        <span class="text-sm">{{ entry.payload?.name }}</span>
-                        <span v-if="entry.payload?.description" class="mt-1 block text-2xs text-muted">
-                            {{ entry.payload.description }}
+                <!--
+                    In place rather than on its own page: the list is where
+                    somebody notices the typo. One row at a time, because two
+                    open editors would need two drafts and nothing wants that.
+                -->
+                <form
+                    v-else-if="renaming === entry.record.uuid"
+                    class="space-y-6"
+                    @submit.prevent="saveRename(entry.record)"
+                >
+                    <TextField
+                        v-model="renameName"
+                        label="name"
+                        autofocus
+                        hint="Encrypted before it leaves this page."
+                    />
+                    <TextField v-model="renameDescription" label="description" />
+
+                    <NoticePanel v-if="renameFailure" tone="accent">{{ renameFailure }}</NoticePanel>
+
+                    <div class="flex items-center gap-4">
+                        <button type="submit" class="btn btn-primary" :disabled="!renameName || renameSaving">
+                            {{ renameSaving ? 'saving…' : 'save' }}
+                        </button>
+                        <button
+                            type="button"
+                            class="text-2xs text-muted hover:text-ink"
+                            @click="renaming = null"
+                        >
+                            cancel
+                        </button>
+                    </div>
+                </form>
+
+                <div v-else class="flex items-baseline justify-between gap-4">
+                    <Link :href="`/lockboxes/${entry.record.uuid}`" class="flex flex-1 justify-between gap-4">
+                        <span>
+                            <span class="text-sm">{{ entry.payload?.name }}</span>
+                            <span v-if="entry.payload?.description" class="mt-1 block text-2xs text-muted">
+                                {{ entry.payload.description }}
+                            </span>
                         </span>
-                    </span>
-                    <span class="text-2xs text-faint">
-                        {{ secretsIn(entry.record.uuid).length }}
-                        {{ secretsIn(entry.record.uuid).length === 1 ? 'secret' : 'secrets' }}
-                    </span>
-                </Link>
+                        <span class="text-2xs text-faint">
+                            {{ secretsIn(entry.record.uuid).length }}
+                            {{ secretsIn(entry.record.uuid).length === 1 ? 'secret' : 'secrets' }}
+                        </span>
+                    </Link>
+
+                    <!--
+                        Only where the payload actually opened. Renaming a
+                        lockbox this browser could not read would seal a name
+                        over contents it never saw.
+                    -->
+                    <button
+                        v-if="canWrite && entry.payload"
+                        type="button"
+                        class="text-2xs text-muted hover:text-ink"
+                        @click="startRename(entry.record.uuid, entry.payload)"
+                    >
+                        rename
+                    </button>
+                </div>
             </div>
         </div>
 
@@ -395,6 +518,8 @@ useDocumentTitle(() => contents.value.vault?.payload?.name ?? 'Vault');
         <NoticePanel v-if="deleteFailure" tone="accent" heading="not deleted" class="mt-6">
             {{ deleteFailure }}
         </NoticePanel>
+
+        <VaultDetails v-if="canWrite" :vault="props.vault" :payload="contents.vault?.payload ?? null" />
 
         <RetentionSettings v-if="isOwner" :vault="props.vault" />
 

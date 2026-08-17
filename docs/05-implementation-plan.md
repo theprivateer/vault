@@ -283,6 +283,27 @@ E2EE CRUD for vaults, lockboxes and secrets, and **the leak canary** that keeps 
 - Tampering with a `payload_ct` byte in the database produces a visible integrity error in the UI,
   not an empty field.
 
+### Carried forward from Phase 3
+
+*Written retrospectively, during Phase 12, after the third gap from this half of the plan was found
+by somebody using the application. Phases 0–2 and 4 still have no section here, which is now a
+known omission rather than an unnoticed one.*
+
+**Task 6 said "create/edit forms" and only half of it was built.** Secrets got an edit form.
+Vaults and lockboxes got create only, so a name or description could be set once and never
+corrected — while `PATCH /vaults/{vault}` and `PATCH /lockboxes/{lockbox}` existed the whole time,
+with a route, a policy, a form request and an audit action whose own description reads "renamed this
+vault". Neither endpoint had a caller and neither had a test, which is exactly what makes this class
+of gap invisible: from inside the repository a routed, authorised, audited endpoint looks finished.
+
+Built in Phase 12 — the vault's in a settings panel, the lockbox's inline in the list — along with
+`tests/Feature/Vault/RenameTest.php`, the first coverage either endpoint has had.
+
+**The pattern is now three for three.** Every work item found missing after the fact —
+[F11](07-penetration-test.md)'s drifted `dontFlash` list from Phase 0, Phase 2 task 9's "and email
+notification", and this — came from the half of the plan with no carried-forward sections. None came
+from phases 5–13, which have them.
+
 ---
 
 ## Phase 4 — Client state, search & UX

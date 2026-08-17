@@ -5,7 +5,16 @@ import prettier from 'eslint-config-prettier';
 
 export default ts.config(
     {
-        ignores: ['public/**', 'vendor/**', 'node_modules/**', 'bootstrap/ssr/**', 'coverage/**'],
+        // `storage/**` holds the built crypto Worker, which lives outside
+        // `public/` so the application can serve it with security headers.
+        ignores: [
+            'public/**',
+            'storage/**',
+            'vendor/**',
+            'node_modules/**',
+            'bootstrap/ssr/**',
+            'coverage/**',
+        ],
     },
 
     js.configs.recommended,
