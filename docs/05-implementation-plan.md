@@ -808,6 +808,19 @@ reaching the browser tab through `document.title`.
 
 1. Deployment: Laravel Cloud or a hardened VPS. TLS 1.3, automated certificates, Postgres with
    encryption at rest (belt and braces — the data is already ciphertext).
+
+   *Target is Laravel Forge on a VPS, which keeps the database roles under our control — needed for
+   the `REVOKE UPDATE, DELETE ON audit_events` layer, the one defence of the append-only log that a
+   future code change cannot undo.*
+
+   *Done ahead of the deployment: **CI now runs the whole suite against Postgres**, which it never
+   had. Everything had been exercised on SQLite, where a column type is close to a comment, so the
+   first Postgres execution of this schema would otherwise have been the production one. The suite
+   passed unchanged — the boring outcome, and worth having on record rather than assumed. The job
+   also carries the two checks that cannot run anywhere else: that `grant_payload` gives back the
+   exact bytes that were signed (`json`, never `jsonb` — measured in
+   [04](04-data-model.md#vault_memberships)), and that an unprivileged role really is refused
+   `UPDATE` and `DELETE` on `audit_events` while an `INSERT` still succeeds.*
 2. Backup and **restore rehearsal**. A backup you have not restored is a hypothesis. Restore into
    a scratch environment and unlock a real vault from it.
 3. **Full client-side export** to an encrypted archive and to plaintext JSON with a deliberately

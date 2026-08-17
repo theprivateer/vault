@@ -13,8 +13,10 @@ Conventions throughout:
 - **UUIDv7 public identifiers**, generated client-side so AAD can bind to them before insert.
   Auto-increment `id` stays internal and never appears in a URL or an API response.
 - **Every table gets a leakage note.** If a column is plaintext, the reason is written down.
-- Postgres in production (real `CHECK` constraints, `jsonb`); SQLite is fine for local dev and
-  tests, which is the current `.env` default.
+- Postgres in production, for real `CHECK` constraints and a database that means what a column type
+  says. **Not `jsonb` anywhere** — see `grant_payload` below, where it would be actively unsafe.
+  SQLite is the `.env` default and is fine for local dev, and CI runs the whole suite against both,
+  because the divergences that matter here are invisible on SQLite by construction.
 
 ## Diagram
 
@@ -227,10 +229,24 @@ exactly like tampering. Read it as a string; parse a copy if you need the fields
 
 The same reasoning constrains the column type, which is easy to get wrong in the other direction.
 The migration declares `json`, which on Postgres stores the input text verbatim and is therefore
-safe. **`jsonb` would not be:** it normalises whitespace, reorders keys and drops duplicates, which
-is precisely the re-encoding this column exists to avoid. If the type is ever revisited, `text` is
-the honest choice — the value is a signed blob that happens to look like JSON, not a document the
-database should have opinions about.
+safe. **`jsonb` would not be.** Measured against Postgres 17, storing one deliberately awkward
+string in all three candidate types:
+
+| type | what came back |
+| --- | --- |
+| `json` | `{"v":1, "role":"editor",  "role":"viewer", "url":"…/a\/b", "who":"…"}` — identical |
+| `text` | identical |
+| `jsonb` | `{"v": 1, "url": "…/a/b", "who": "…", "role": "viewer"}` — **changed** |
+
+`jsonb` reordered the keys, normalised the whitespace, unescaped the solidus and dropped the
+duplicate key, keeping `viewer` where the signed bytes said `editor`. Any one of the first three
+makes the signature fail to verify, in a way indistinguishable from tampering, on a row that was
+written correctly. The fourth changes what the document says.
+
+Pinned by `tests/Feature/PostgresStorageTest.php`, which asserts the round trip rather than only the
+type name and skips on SQLite, where the question is meaningless. If the type is ever revisited,
+`text` is the honest choice — the value is a signed blob that happens to look like JSON, not a
+document the database should have opinions about.
 
 **Re-granting reuses the row**, because `(vault_id, user_id)` is unique. What must not be reused is
 `accepted_at`: it is cleared, so a returning member verifies again. The reason somebody was removed

@@ -25,3 +25,4 @@ Before planning or editing, find the row whose globs match the file's path and r
 | app/Support/AuditLog.php | .ai/rules/support.md |
 | tests/** | .ai/rules/tests.md |
 | resources/js/crypto/worker/** | .ai/rules/worker.md |
+| .github/workflows/** | .ai/rules/workflows.md |

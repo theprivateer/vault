@@ -56,6 +56,111 @@ jobs:
       - name: Tests
         run: php artisan test --coverage
 
+  # The suite again, against the database production actually runs (Phase 12,
+  # task 1). SQLite is fine for behaviour and blind to the thing that matters
+  # here: three columns hold bytes somebody signed, and on SQLite a column type
+  # is close to a comment, so `json` and `jsonb` behave identically. On Postgres
+  # `jsonb` reorders keys, normalises whitespace and drops duplicates — each of
+  # which turns a valid signature into one that looks like tampering.
+  #
+  # Its own job rather than a matrix on `backend`, because the analysis, the
+  # formatting check and the asset build have nothing to do with the database
+  # and running them twice buys nothing.
+  postgres:
+    name: Backend (Postgres)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: vault_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DB_CONNECTION: pgsql
+      DB_HOST: 127.0.0.1
+      DB_PORT: 5432
+      DB_DATABASE: vault_test
+      DB_USERNAME: postgres
+      DB_PASSWORD: postgres
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ env.PHP_VERSION }}
+          extensions: sodium, pgsql, pdo_pgsql
+          coverage: none
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install PHP dependencies
+        run: composer install --prefer-dist --no-interaction --no-progress
+
+      - name: Install JS dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Build assets
+        run: npm run build
+
+      - name: Prepare environment
+        run: |
+          cp .env.example .env
+          php artisan key:generate
+
+      - name: Tests
+        run: php artisan test
+
+      # Everything above connects as the owner, which is correct for a test
+      # database and is not how production connects. This proves the grant that
+      # makes `audit_events` append-only at the database level is actually
+      # applicable to the schema the migrations produce — the layer that a
+      # future code change cannot undo, and the one nothing else can check.
+      - name: The audit log refuses UPDATE and DELETE to an unprivileged role
+        run: |
+          export PGPASSWORD=postgres
+          psql -h 127.0.0.1 -U postgres -d vault_test -v ON_ERROR_STOP=1 <<'SQL'
+            CREATE ROLE vault_app LOGIN PASSWORD 'vault_app';
+            GRANT USAGE ON SCHEMA public TO vault_app;
+            GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO vault_app;
+            GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO vault_app;
+            REVOKE UPDATE, DELETE ON audit_events FROM vault_app;
+          SQL
+
+          # An INSERT must still work — a log that cannot be appended to is not
+          # a log, and revoking too much is as wrong as revoking too little.
+          PGPASSWORD=vault_app psql -h 127.0.0.1 -U vault_app -d vault_test -v ON_ERROR_STOP=1 -c \
+            "INSERT INTO audit_events (seq, prev_hash, hash, action, metadata, created_at)
+             VALUES (1, repeat('0', 64), repeat('1', 64), 'auth.logged_in', '{}', now());"
+
+          # An UPDATE and a DELETE must both be refused by the database itself,
+          # not by the model. `!` inverts the exit status: these must fail.
+          ! PGPASSWORD=vault_app psql -h 127.0.0.1 -U vault_app -d vault_test -v ON_ERROR_STOP=1 -c \
+            "UPDATE audit_events SET action = 'auth.logged_out' WHERE seq = 1;"
+
+          ! PGPASSWORD=vault_app psql -h 127.0.0.1 -U vault_app -d vault_test -v ON_ERROR_STOP=1 -c \
+            "DELETE FROM audit_events WHERE seq = 1;"
+
+          # And the revoke must be scoped to that one table. An over-broad grant
+          # would leave the application unable to edit a secret, which is the
+          # failure mode of getting this right in the wrong direction.
+          psql -h 127.0.0.1 -U postgres -d vault_test -v ON_ERROR_STOP=1 -t -c \
+            "SELECT CASE WHEN has_table_privilege('vault_app', 'vaults', 'UPDATE')
+                          AND has_table_privilege('vault_app', 'secrets', 'DELETE')
+                    THEN 'ok' ELSE 'over-broad revoke' END;" | grep -q ok
+
   frontend:
     name: Frontend
     runs-on: ubuntu-latest

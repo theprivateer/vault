@@ -378,13 +378,16 @@ properly, and a plan that names them is what stops them being quietly dropped.
 
 ## CI gates
 
-Every gate listed as running blocks merge, across four jobs in `.github/workflows/ci.yml`.
+Every gate listed as running blocks merge, across five jobs in `.github/workflows/ci.yml`.
 
 | Gate | Tool | Status |
 | --- | --- | --- |
 | PHP style | `vendor/bin/pint --test` | running |
 | PHP static analysis | Larastan, max level | running |
 | PHP tests + coverage | `php artisan test --coverage` | running |
+| **The suite again, on Postgres** | The database production actually runs, in its own job | running |
+| **Signed bytes survive the column** | `PostgresStorageTest` — `json` not `jsonb`, asserted as a round trip | running, in the Postgres job |
+| **`audit_events` refuses UPDATE and DELETE** | A real `REVOKE` against an unprivileged role, in SQL | running, in the Postgres job |
 | **Leak canary** | Pest — currently inside the backend job rather than its own | running |
 | **No decrypt in `app/`** | `NoServerDecryptionTest` (SR2), run again as its own job | running, in the security job |
 | Headers | `SecurityHeadersTest`, asserted against real Vite output (SR10), including Trusted Types and the integrity hashes | running, inside the PHP suite |
@@ -403,6 +406,23 @@ Every gate listed as running blocks merge, across four jobs in `.github/workflow
 The leak canary was specified as its own job "so a failure is unmissable". It runs inside the
 backend suite instead, which is a real if minor loss — a red backend job does not say *which*
 guarantee broke. Worth splitting out when the CI file is next touched.
+
+**The Postgres job exists because the suite had never touched the database it was designed for**
+(Phase 12, task 1). The whole suite ran on SQLite and only on SQLite, where a column type is close
+to a comment — so `json` and `jsonb` are indistinguishable, and the one column whose bytes carry a
+signature could have been declared either way with nothing noticing until a grant stopped verifying
+in production. The suite passed on Postgres unchanged, which is the boring outcome and the one worth
+having on record.
+
+Two things in that job cannot run anywhere else. `PostgresStorageTest` asserts that a deliberately
+awkward JSON string comes back byte for byte, which is the property the signature depends on rather
+than the type name that implies it — the numbers are in
+[04 § grant_payload](04-data-model.md#vault_memberships). And the append-only log's third defence is
+tested as SQL: create an unprivileged role, `REVOKE UPDATE, DELETE ON audit_events`, then prove an
+`INSERT` still succeeds while an `UPDATE` and a `DELETE` are refused **by the database**. The first
+two defences are code, and code is what a future change can undo. That job also checks the revoke is
+scoped, since an over-broad one would leave the application unable to edit a secret — the same
+mistake in the other direction, and the one that would be found by a user rather than by a test.
 
 **The SR2 gate used to be a `grep` and it was broken.** It matched the *word* `decrypt`, which
 meant `Ciphertext`'s docblock — the one that says it deliberately has no `decrypt()` method —
