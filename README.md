@@ -61,6 +61,13 @@ Other honest limitations:
 - **The sharing graph is visible.** Who shares what with whom, and when. Hiding it needs private
   information retrieval, which is out of scope.
 
+**If you are deciding whether to trust this**, the useful document is
+[09 — Evaluating This Yourself](docs/09-evaluating-this.md). It follows one password through the
+whole system, lists what a hostile server would have to defeat at each step and the test that says
+so, and is explicit about the claims you cannot verify from outside. It also ends with seven
+questions worth asking of *any* product in this category — most of which are more useful than any
+answer this one gives.
+
 ## Documentation
 
 Read in this order:
@@ -71,105 +78,49 @@ Read in this order:
 | [02 — Threat Model](docs/02-threat-model.md) | Assets, adversaries, what is and is not protected, accepted leakage |
 | [03 — Cryptographic Design](docs/03-cryptographic-design.md) | Key hierarchy, primitives, envelope format, every protocol flow |
 | [04 — Data Model](docs/04-data-model.md) | Schema, and what each unencrypted column leaks |
-| [05 — Implementation Plan](docs/05-implementation-plan.md) | Thirteen phases, each with deliverables and exit criteria |
+| [05 — Implementation Plan](docs/05-implementation-plan.md) | Fourteen phases, each with deliverables, exit criteria, and what it left undone |
 | [06 — Testing & CI](docs/06-testing-and-ci.md) | The four tests that matter most, and the CI gates |
-| [08 — Retrospective](docs/08-retrospective.md) | What the zero-knowledge constraint cost, and what I would change |
+| [07 — Penetration Test](docs/07-penetration-test.md) | The self-directed test: every finding, its fix, and what was accepted rather than fixed |
+| [08 — Retrospective](docs/08-retrospective.md) | What the zero-knowledge constraint cost, what surprised me, and what I would change |
+| [09 — Evaluating This Yourself](docs/09-evaluating-this.md) | Every claim above, with a way to check it — and the ones you cannot check |
 | [adr/](docs/adr/) | Decision records — what was chosen, and what was rejected |
 
 ## Status
 
-Phases 0–11 and 13 of [thirteen](docs/05-implementation-plan.md) are complete: a working
-zero-knowledge vault that can be shared with other people and taken back, holds encrypted
-attachments, keeps a tamper-evident log of what happened in it, remembers what its secrets used to
-say, can hand a single credential to somebody who has no account at all, treats key rotation as a
-routine operation rather than an emergency one, lets you leave with everything in a file it cannot
-read, and has been attacked on purpose with the results
+**Phases 0–11 and 13 of fourteen are complete. Phase 12 — operations and release — is in progress:
+everything that can be built has been, and the deployment itself has not happened yet.**
+
+What works today: an invite-only, end-to-end encrypted vault that can be shared with other people
+and taken back, holds encrypted attachments, keeps a tamper-evident log of what happened in it,
+remembers what its secrets used to say, can hand a single credential to somebody with no account at
+all, treats key rotation as routine rather than as an emergency, lets you leave with everything in
+a file it cannot read, and has been attacked on purpose with the results
 [written down](docs/07-penetration-test.md).
 
-- **Phase 0** — Inertia + Vue + TypeScript strict, a nonce-based CSP enforced from the first
-  render, static analysis at maximum, CI gating every check.
-- **Phase 1** — the crypto core: envelope format with mandatory AAD binding, the key hierarchy,
-  sealed boxes, identities, and the crypto Worker. Verified against RFC vectors and cross-checked
-  byte-for-byte against PHP's `ext-sodium`.
-- **Phase 2** — invite-only registration, split-key login, the recovery kit, password change, TOTP,
-  and the unlock state machine.
-- **Phase 3** — vaults, lockboxes and secrets, end to end, plus the leak canary and the IDOR suite.
-- **Phase 4** — the decrypted-item store and its synchronous wipe on lock, bulk decryption in the
-  Worker, client-side search, payload padding, optimistic writes with concurrent-edit detection,
-  and the scale ceiling measured rather than guessed at.
+What has not: it has not been deployed, has never been restored from a backup, and nobody
+independent has reviewed any of it. The full outstanding list is in
+[08 § What is still not true](docs/08-retrospective.md).
 
-- **Phase 5** — sharing by signed grant, trust-on-first-use fingerprint pinning with a hard stop
-  when a key changes, and revocation that triggers an atomic re-key. The phase where the
-  asymmetric layer earns its place. Ownership transfer closes it out, and is the one write here
-  that carries no key material at all: the recipient already holds the Vault Key, so handing a
-  vault over moves who may administer it and re-encrypts nothing. A vault with other members
-  refuses to be deleted, since their access *is* a sealed copy of that key.
-- **Phase 6** — encrypted file attachments: chunked AES-256-GCM through WebCrypto, with each
-  chunk's index and its file's chunk count bound into the associated data, so truncation and
-  reordering fail the tag rather than an application check. Resumable uploads, per-vault quotas, and
-  filenames that exist only inside the encrypted manifest.
-- **Phase 7** — a tamper-evident audit log: a BLAKE2b chain over every action, append-only, with the
-  chain head mailed to the operator daily. The two events the server cannot witness — a vault
-  unlocked, a secret revealed — are reported by the browser and signed, so the one thing a
-  compromised server could invent is the one thing it cannot.
-- **Phase 8** — version history: an edit appends rather than overwrites, and the archived payload is
-  a fresh encryption bound to its own identity rather than a copy of the column it replaced — which
-  is what stops a server writing an old password back over the current one. Diffing is client-side,
-  restoring is an ordinary edit and therefore never destructive, and retention plus an outright
-  purge bound how long a rotated credential stays recoverable.
+| Phase | What it added |
+| --- | --- |
+| 0 | Inertia + Vue + TypeScript strict, a nonce-based CSP from the first render, static analysis at maximum, CI gating every check |
+| 1 | The crypto core: envelope format with mandatory AAD binding, the key hierarchy, sealed boxes, identities, the Worker. RFC vectors, and cross-checked byte-for-byte against PHP's `ext-sodium` |
+| 2 | Invite-only registration, split-key login, the recovery kit, password change, TOTP, and the unlock state machine |
+| 3 | Vaults, lockboxes and secrets end to end, plus the leak canary and the IDOR suite |
+| 4 | The decrypted-item store and its synchronous wipe on lock, bulk decryption, client-side search, payload padding, and the scale ceiling measured rather than guessed |
+| 5 | Sharing by signed grant, trust-on-first-use pinning with a hard stop when a key changes, revocation that triggers an atomic re-key, and ownership transfer |
+| 6 | Encrypted attachments: chunked AES-256-GCM with each chunk's index *and its file's chunk count* bound into the associated data, so truncation fails the tag rather than a check |
+| 7 | A tamper-evident audit log — a BLAKE2b chain, append-only, head mailed daily to an address the server does not administer. The two events the server cannot witness are signed by the browser |
+| 8 | Version history, where an archived payload is a fresh encryption bound to its own identity rather than a copy of the column it replaced |
+| 9 | Browser-generated TOTP codes, password and passphrase generators whose entropy is arithmetic rather than an estimate, and one-time share links that keep both halves of the credential in the URL fragment |
+| 10 | Key lifecycle: vaults re-keyed on demand, identity keys replaced without anybody else acting, Argon2id parameters raised silently on next login, and old envelopes migrated as an operation rather than a migration |
+| 11 | Hardening, and a [self-directed penetration test](docs/07-penetration-test.md) with every finding, its fix and the test that now guards it |
+| 13 | Typed secrets: twelve kinds of item whose fields differ, driven by one declarative table rather than twelve bespoke forms |
+| 12 | *In progress.* Client-side export to an encrypted archive with a standalone offline decryptor; the suite running against Postgres as well as SQLite; deployment preflight and audit anomaly alerts; and log hygiene — including a fix for a failed query that used to write its bindings, ciphertext and wrapped keys included, straight into the log |
 
-- **Phase 9** — TOTP codes generated in the browser from a seed stored like any other field, password
-  and passphrase generators whose entropy is arithmetic rather than an estimate, and one-time share
-  links. A link carries its own key in the URL fragment, so the server holds a payload it cannot read
-  and a hash it cannot reverse; putting the bearer token there too keeps it out of every access log
-  and means a chat client's link preview cannot spend the single view.
-
-- **Phase 10** — key lifecycle: vault keys rotated on demand rather than only after a revocation,
-  identity keys replaced **without anybody else acting** — you still hold the old private key, so
-  your own browser re-seals every vault key to the new pair — and Argon2id parameters re-run silently
-  on the next login, which is the only moment a browser holds the password. A rotation is announced
-  by a notice signed with the key being retired, so a peer can tell "they rotated" from "the server
-  substituted a key"; it changes what the warning says and never whether it appears, because a stolen
-  key signs an equally valid notice. Moving old ciphertext onto a new envelope format is an operation
-  rather than a migration — the server cannot re-seal what it cannot read — so a vault owner runs it
-  from the browser, and it carries a compare-and-swap so a stale tab cannot write old plaintext back
-  under a new wrapper.
-
-- **Phase 11** — hardening, and a [self-directed penetration test](docs/07-penetration-test.md)
-  written up with every finding and its fix. The ones worth naming are the ones that were nobody's
-  code: a framework default had registered two endpoints serving the encrypted file store outside
-  the authorisation model and outside the audit log, and a stale dev-server marker had quietly
-  switched the entire test suite onto output nothing in production emits — the assertions kept
-  passing against tags that do not exist. The login form was answering *twice as slowly* for an
-  address that did not exist, because the decoy hash meant to conceal that was being generated on
-  every request. Trusted Types is enforced with no default policy, which meant removing every
-  `innerHTML` from the runtime rather than allowing one, and the threat model now lives in the
-  product at `/security` rather than only in this repository — because a threat model only its
-  author reads is a document for people who were already going to trust it.
-
-- **Phase 13** — typed secrets: twelve kinds of item whose fields differ, driven by one declarative
-  table rather than twelve bespoke forms. That shape is the decision — it converts "no credential
-  field is searchable" and "nothing renders unmasked" from properties a reviewer checks by eye into
-  loops over a table. Old payloads still render, including every `card` written when a card was one
-  free-text box, and an edit carries through fields this build has never heard of rather than
-  dropping what it cannot display.
-
-**Phase 12** — operations and release — is underway. Built so far: **a full client-side export**, to
-an encrypted archive and to plaintext JSON that leads with a warning about what it is. The archive
-ships with a standalone offline decryptor: one HTML file with everything inlined and a
-`default-src 'none'` policy of its own, so it opens an archive on a machine that has never heard of
-this server. An encrypted backup that only its own application can read is not a backup, and this is
-the half of D3 that makes "there is no password reset" a defensible thing to say rather than a
-hostage note.
-
-Also built for Phase 12: the suite now runs against **Postgres** as well as SQLite, which caught a
-`HAVING` clause that works on one and throws on the other; `vault:preflight`, which checks a
-deployment against the assumptions these documents make, including asking the database whether the
-`REVOKE` on `audit_events` was actually applied; `vault:anomalies`, a daily report to the operator
-covering mass reveals, failed sign-in bursts, recovery-kit use and full exports; and a fix for a
-real leak — a failed query used to write its bindings into the log, which on a secret write meant
-the payload ciphertext and the wrapped Item Key in plain sight.
-
+Phase 13 is numbered after 12 because it was added later, from a question about whether the secret
+types meant anything. They did not. [05](docs/05-implementation-plan.md) has the detail on every
+phase, including a "carried forward" section recording what each one left undone.
 ## Stack
 
 - **Backend** — Laravel 13, PHP 8.4 with `ext-sodium`, Pest 5, Larastan at max level

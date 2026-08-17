@@ -18,6 +18,7 @@ ciphertext and wrapped keys, and never holds a key capable of decrypting them.**
 | [06 — Testing & CI](06-testing-and-ci.md) | Test strategy, the leak canary, CI gates |
 | [07 — Penetration Test](07-penetration-test.md) | The self-directed test: every finding, its fix, and what was deliberately left |
 | [08 — Retrospective](08-retrospective.md) | What zero-knowledge cost, what surprised me, and what I would do differently |
+| [09 — Evaluating This Yourself](09-evaluating-this.md) | Every claim with a way to check it, and the ones that cannot be checked from outside |
 | [adr/](adr/) | Decision records — why a choice was made, and what was rejected |
 
 ## The one-paragraph summary

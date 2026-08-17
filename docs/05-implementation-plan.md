@@ -885,6 +885,20 @@ reaching the browser tab through `document.title`.
    responding to a suspected server compromise.
 7. `README.md` rewrite, and a walkthrough of the cryptographic design for a reader who is
    evaluating whether to trust it.
+
+   *Both written. The README's Status section had become a development log — thirteen paragraphs of
+   phase notes with two more appended — so it is now a short statement of what works and what does
+   not, plus one line per phase, with the detail left where it belongs in this document. It also
+   says outright that nothing has been deployed and nobody independent has reviewed it.*
+
+   *The walkthrough is [09 — Evaluating This Yourself](09-evaluating-this.md), and it is a different
+   document for a different reader than [03](03-cryptographic-design.md): organised by question
+   rather than by mechanism, and written so that **every claim carries a way to check it** — a
+   command to run, a test to read, a file to open. It follows one password from the keyboard to the
+   sealed payload, then inverts the view into a table of what a hostile server would have to defeat
+   at each step. It closes with what cannot be checked from outside, and with seven questions worth
+   asking of any product in this category, followed by the places this one falls short of them. A
+   trust document that passes its own examination perfectly is one to be suspicious of.*
 8. **A retrospective document**: what the zero-knowledge constraint actually cost, which decisions
    would change, and what surprised you. This is the deliverable that makes the project pay back
    as a learning exercise rather than just a working app.
