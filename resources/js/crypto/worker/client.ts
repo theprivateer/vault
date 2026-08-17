@@ -42,8 +42,15 @@ export type WorkerFactory = () => Worker;
  * the browser refuses to construct a Worker from. Building the Worker to a
  * fixed path (see vite.worker.config.ts) makes development and production
  * behave identically and keeps `worker-src 'self'` intact.
+ *
+ * **Served by the application, not from `public/`.** It lived at
+ * `/build/crypto.worker.js` until the first deployment, where nginx served it
+ * with no headers — and a document sending `Cross-Origin-Embedder-Policy:
+ * require-corp` may only create a dedicated worker whose own response carries a
+ * compatible COEP. The browser refused it and nothing could be encrypted. See
+ * App\Http\Controllers\CryptoWorkerController and docs/07 F13.
  */
-export const WORKER_URL = '/build/crypto.worker.js';
+export const WORKER_URL = '/crypto.worker.js';
 
 /**
  * The Worker constructor is a Trusted Types sink, and this is its policy.

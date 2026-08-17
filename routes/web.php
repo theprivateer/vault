@@ -8,6 +8,7 @@ use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\Auth\RecoveryController;
 use App\Http\Controllers\Auth\RegisterController;
 use App\Http\Controllers\Auth\TotpController;
+use App\Http\Controllers\CryptoWorkerController;
 use App\Http\Controllers\FileChunkController;
 use App\Http\Controllers\FileController;
 use App\Http\Controllers\IdentityRotationController;
@@ -27,6 +28,21 @@ use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
 Route::redirect('/', '/vaults')->name('home');
+
+/*
+ | The crypto Worker script (docs/07 F13).
+ |
+ | Outside both `auth` and `guest`: registration and login both need to encrypt
+ | before anybody is authenticated, and a signed-in user needs it too.
+ |
+ | It is served by the application rather than from `public/` so that it carries
+ | security headers at all — a document sending COEP `require-corp` may only
+ | create a dedicated worker whose own response carries a compatible COEP, and a
+ | file nginx serves directly gets none. That was found by deploying it.
+ */
+Route::get('/crypto.worker.js', CryptoWorkerController::class)
+    ->middleware('throttle:60,1')
+    ->name('crypto.worker');
 
 /*
  | One-time share links (Phase 9).

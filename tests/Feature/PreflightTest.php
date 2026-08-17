@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\CryptoWorkerController;
 use Illuminate\Support\Facades\Artisan;
 
 /**
@@ -39,6 +40,31 @@ function productionish(array $overrides = []): void
 
     config($settings);
 }
+
+/*
+ | A deploy script that runs only `vite build` skips the worker, which breaks
+ | encryption everywhere with no other symptom. Cheap to check and expensive to
+ | diagnose from the browser (docs/07 F13).
+ */
+it('fails when the crypto worker has not been built', function () {
+    productionish();
+
+    $built = storage_path(CryptoWorkerController::PATH);
+    $moved = $built.'.moved';
+
+    if (! is_file($built)) {
+        $this->markTestSkipped('Run `npm run build:worker` first.');
+    }
+
+    rename($built, $moved);
+
+    try {
+        expect(Artisan::call('vault:preflight'))->toBe(1);
+        expect(Artisan::output())->toContain('crypto worker is missing');
+    } finally {
+        rename($moved, $built);
+    }
+});
 
 it('reports one failure when everything it can check in a test environment is right', function () {
     productionish();

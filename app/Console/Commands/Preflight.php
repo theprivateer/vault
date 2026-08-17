@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Http\Controllers\CryptoWorkerController;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
@@ -107,6 +108,15 @@ class Preflight extends Command
             'file bodies are on an object store',
             'VAULT_FILES_DISK is "local", so attachment ciphertext sits on the application disk — a '
                 .'second thing to back up, and the one people forget until a restore is missing it.'
+        );
+
+        $this->must(
+            is_file(storage_path(CryptoWorkerController::PATH)),
+            'the crypto worker has been built',
+            'The crypto worker is missing from '.CryptoWorkerController::PATH.', so every page will '
+                .'report that encryption is unavailable. Run `npm run build` on the deployment; the '
+                .'worker is built separately from the main bundle and a deploy script that only runs '
+                .'`vite build` will skip it.'
         );
 
         $this->newLine();

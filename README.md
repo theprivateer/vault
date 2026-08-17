@@ -160,6 +160,12 @@ npm run build:worker    # after changing anything in resources/js/crypto
 That is a deliberate trade. The one part of this codebase that should never be swapped out
 invisibly is the part holding the keys.
 
+The Worker is built **outside `public/`** and served by the application, so that it carries the same
+security headers as every other response — a document sending `Cross-Origin-Embedder-Policy:
+require-corp` may only create a dedicated worker whose own response carries a compatible COEP, and a
+file the web server hands out directly gets none. A deploy that runs only `vite build` will skip it;
+`php artisan vault:preflight` fails when it is missing.
+
 The offline archive decryptor is built the same way, to a single self-contained HTML file:
 
 ```bash

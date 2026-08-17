@@ -177,6 +177,10 @@ because the `Worker` constructor has no integrity option in any browser.
 costs nothing and closes the document to anything embedded from elsewhere. Omitted while the Vite
 dev server is running, since that serves modules cross-origin.
 
+*That last sentence about cost was wrong, and the way it was wrong is worth keeping: `require-corp`
+constrains **workers** as well as subresources, and the crypto Worker was a static file with no
+headers. See F13.*
+
 ### F11 — A concurrent edit wrote wrapped Item Keys into the session store
 
 **Severity: low. Fixed.** *Found after Phase 11 closed, in a sweep of the implementation plan for
@@ -222,7 +226,7 @@ field added next year is covered without anyone remembering to come back to it.
 the only way it could have been found.*
 
 Two sinks, one cause. On the first page load behind the shipped CSP, the browser refused
-`new Worker('/build/crypto.worker.js')` — the Worker constructor takes a **TrustedScriptURL**, not a
+`new Worker('/crypto.worker.js')` — the Worker constructor takes a **TrustedScriptURL**, not a
 string, because it is a way to make the browser fetch and execute code — so every page reported that
 encryption was unavailable. Separately, Inertia's head manager threw a `TrustedHTML` violation on
 start-up and on every navigation.
@@ -255,6 +259,36 @@ refuses. The `title` option is gone, and `security.test.ts` now asserts its abse
 For the record, Inertia has five sink assignments and all five are now accounted for: two build its
 error modal (suppressed with `preventDefault()` on `httpException` and `networkError` in
 `RequestChrome.vue`), one builds its progress bar (`progress: false`), and two are the head manager.
+
+### F13 — The embedder policy blocked the crypto Worker
+
+**Severity: high — the application did not work at all. Fixed.** *Found by deploying it, a few
+minutes after F12.*
+
+With F12 fixed and TLS in place, the Worker was refused again, this time by
+`Cross-Origin-Embedder-Policy`. A document sending `require-corp` may only create a dedicated worker
+whose **own response** carries a compatible COEP — same-origin is not enough, and the inheritance
+rule is separate from the `Cross-Origin-Resource-Policy` check that same-origin requests pass by
+default. The Worker was a static file under `public/`, so nginx served it and the application's
+middleware never saw it: no COEP, and for that matter no `nosniff`, no CORP, and no `Content-Type`
+this application chose.
+
+F10's own justification is what failed here. "Every subresource here is our own, so `require-corp`
+costs nothing" is true of subresources and false of workers, and nothing checked it because nothing
+in the suite ever requested that file — it was not a route.
+
+**Fixed** by moving the build output to `storage/app/private/worker/` and serving it from
+`App\Http\Controllers\CryptoWorkerController`, which sets COEP, CORP, `nosniff` and an explicit
+content type, and revalidates rather than caching hard. The alternative was an `add_header` in the
+site's nginx configuration; it was rejected because this is the second consecutive outage caused by
+something that ships but is never exercised, and a header in a server config is invisible to CI,
+impossible to assert, and gone on the next host. `tests/Feature/CryptoWorkerTest.php` now asserts
+every one of those headers, and `vault:preflight` fails when the worker has not been built —
+a deploy script that runs only `vite build` skips it, which breaks encryption with no other symptom.
+
+Worth naming as a side effect: the most security-critical asset in this codebase had been the one
+file exempt from the middleware every other response goes through, and nobody had noticed because
+it worked.
 
 ## The checklist, and what it did not find
 

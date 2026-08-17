@@ -1,5 +1,7 @@
 <?php
 
+use App\Http\Controllers\CryptoWorkerController;
+
 /**
  * Exercised against /login because it renders a real Inertia page with the Vite
  * bundle — the nonce assertion needs actual script tags, not a redirect.
@@ -192,9 +194,16 @@ describe('subresource integrity', function () {
      | script that cannot carry an integrity attribute: it is loaded by the
      | Worker constructor, which has no integrity option in any browser. Named
      | rather than left as an unexplained gap in the coverage above.
+     |
+     | It is also no longer in `public/` at all — it is served by
+     | CryptoWorkerController so that it carries security headers, which a file
+     | nginx hands out directly cannot (docs/07 F13). So it is absent from the
+     | manifest twice over, and the assertion is now that it is not there rather
+     | than that it is there and unlisted.
      */
     it('cannot cover the crypto worker, which is loaded without a tag', function () {
-        expect(file_exists(public_path('build/crypto.worker.js')))->toBeTrue()
+        expect(is_file(storage_path(CryptoWorkerController::PATH)))->toBeTrue()
+            ->and(is_file(public_path('build/crypto.worker.js')))->toBeFalse()
             ->and((string) file_get_contents(public_path('build/manifest.json')))
             ->not->toContain('crypto.worker.js');
     });

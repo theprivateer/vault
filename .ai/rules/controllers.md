@@ -9,6 +9,7 @@ paths:
   - app/Http/Controllers/IdentityRotationController.php
   - app/Http/Controllers/VaultResealController.php
   - app/Http/Controllers/AccountExportController.php
+  - app/Http/Controllers/CryptoWorkerController.php
 ---
 
 # Controllers
@@ -92,3 +93,14 @@ There is no route parameter, so there is no `can:` middleware to attach — whic
 Trashed vaults, lockboxes and secrets are excluded. The 30-day grace period is a property of this server and a file on a USB stick cannot honour it, so an archive that reintroduced deleted credentials would be a surprise in the wrong direction.
 
 `account.exported` is recorded *before* the response is built. Logging it after the bytes are out would make the widest read in the application the one read that can be made not to appear, by cutting the connection.
+
+## The crypto Worker is served by the app, never from public/
+A document sending `Cross-Origin-Embedder-Policy: require-corp` may only create a dedicated worker whose **own response** carries a compatible COEP. Same-origin is not enough — that inheritance rule is separate from the CORP check, which same-origin requests pass by default.
+
+The Worker used to live in `public/build/`, so nginx served it and the middleware never saw it: no COEP, no CORP, no nosniff, no chosen Content-Type. The browser refused to load it and the whole application reported "encryption unavailable" (docs/07 F13).
+
+So: `vite.worker.config.ts` builds to `storage/app/private/worker/`, and this controller serves it. **Do not move it back under `public/`, and do not fix a header problem here with an nginx `add_header`** — a server-config header is invisible to CI, cannot be asserted, and is gone on the next host. This was the second consecutive outage caused by something that ships but is never exercised.
+
+`CryptoWorkerController::PATH` is the contract with the build config; if they disagree the route 404s and the symptom is identical to the outage. `vault:preflight` checks the file exists, because a deploy script running only `vite build` skips the worker.
+
+Route is public (registration and login encrypt before auth) and rate-limited. Guarded by tests/Feature/CryptoWorkerTest.php.
